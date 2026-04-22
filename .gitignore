@@ -1,0 +1,49 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Go build artifacts
+bin/
+dist/
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+*.coverprofile
+
+# Logs and runtime files
+*.log
+logs/
+tmp/
+temp/
+
+# Local databases / state
+*.db
+*.sqlite
+*.sqlite3
+
+# Control plane secrets/certs
+secrets/
+certs/
+*.pem
+*.key
+*.crt
+
+# Dependency/vendor (uncomment if vendoring is not committed)
+# vendor/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

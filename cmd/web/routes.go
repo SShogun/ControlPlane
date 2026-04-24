@@ -1,26 +1,36 @@
 package main
 
 import (
-	"github.com/alexedwards/scs/pgxstore"
-	"github.com/alexedwards/scs/v2"
+	"net/http"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func routes(conn *pgxpool.Pool) *chi.Mux {
+type templateData struct {
+	Flash string
+}
+
+func (app *Application) routes() http.Handler {
 	r := chi.NewRouter()
+
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
-	sessionManager := scs.New()
-	sessionManager.Store = pgxstore.New(conn)
-	//session management
-	r.Get("/", home)
-	r.Post("/login", login)
-	r.Get("/notebook/list", notebookList)
-	r.Post("/notebook/create", notebookCreate)
-	r.Get("/notebook/{id}", notebookView)
-	r.Post("/notebook/edit", notebookEdit)
-	r.Post("/notebook/search", notebookSearch)
+	r.Use(middleware.Recoverer)
+	r.Use(app.sessionManager.LoadAndSave)
+
+	r.Get("/", app.Home)
 
 	return r
+}
+
+func (app *Application) newTemplateData(r *http.Request) *templateData {
+	return &templateData{}
+}
+
+func (app *Application) Home(w http.ResponseWriter, r *http.Request) {
+	data := app.newTemplateData(r)
+	data.Flash = app.sessionManager.PopString(r.Context(), "flash")
+	app.render(w, r, http.StatusOK, "home.page.tmpl", data)
 }

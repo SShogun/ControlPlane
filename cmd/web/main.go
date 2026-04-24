@@ -65,6 +65,17 @@ func newTemplateCache(dir string) (map[string]*template.Template, error) {
 			}
 		}
 
+		partials, err := filepath.Glob(filepath.Join(dir, "*.partial.tmpl"))
+		if err != nil {
+			return nil, err
+		}
+		if len(partials) > 0 {
+			ts, err = ts.ParseFiles(partials...)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		cache[name] = ts
 	}
 	return cache, nil
@@ -143,8 +154,7 @@ func main() {
 	go func() {
 		log.Printf("starting server on %s", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			defer pool.Close()
-			log.Fatal("servere error %v", err)
+			log.Fatalf("server error: %v", err)
 		}
 	}()
 	// goroutine for logging server close

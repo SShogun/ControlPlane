@@ -65,7 +65,6 @@ func (app *Application) notebookCreateSubmit(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
-
 	// create an initial revision for the newly created notebook
 	_, err = app.store.CreateNotebookRevision(r.Context(), data.CreateNotebookRevisionParams{
 		DocumentID: id,
@@ -79,6 +78,7 @@ func (app *Application) notebookCreateSubmit(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	app.logAuditEvent(r, "draft_created", "notebook_revision", id)
 	app.sessionManager.Put(r.Context(), "flash", "Draft Created")
 	http.Redirect(w, r, fmt.Sprintf("/notebooks/%d", id), http.StatusSeeOther)
 }

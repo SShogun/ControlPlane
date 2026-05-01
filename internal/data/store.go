@@ -66,6 +66,8 @@ type UserStore interface {
 	CreateTag(ctx context.Context, name string) (int, error)
 	AttachTag(ctx context.Context, notebookID, tagID int) error
 	ListNotebookTags(ctx context.Context, notebookID int) ([]Tag, error)
+	// Audit logging
+	InsertAuditLog(ctx context.Context, params InsertAuditLogParams) error
 }
 
 type Notebook struct {
@@ -93,6 +95,13 @@ type CreateDraftParams struct {
 	AuthorID int
 	Title    string
 	Body     string
+}
+
+type InsertAuditLogParams struct {
+	UserID     int
+	Action     string
+	EntityType string
+	EntityID   int
 }
 
 type SessionManager interface {

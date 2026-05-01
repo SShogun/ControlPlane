@@ -30,7 +30,7 @@ func (app *Application) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	_ = app.sessionManager.RenewToken(r.Context())
 	app.sessionManager.Put(r.Context(), "userID", user.ID)
 	app.sessionManager.Put(r.Context(), "flash", "You have been logged in!")
-
+	app.logAuditEvent(r, "user_login", "user", user.ID)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 

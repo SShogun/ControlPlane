@@ -4,6 +4,7 @@ import (
 	"context"
 	"html/template"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -33,6 +34,7 @@ type Config struct {
 type Application struct {
 	config         Config
 	conn           *pgxpool.Pool
+	logger         *slog.Logger
 	store          data.UserStore
 	sessionManager *scs.SessionManager
 	templateCache  map[string]*template.Template

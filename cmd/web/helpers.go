@@ -44,3 +44,21 @@ func (app *Application) newTemplateData(r *http.Request) *templateData {
 		IsAuthenticated: user != nil,
 	}
 }
+
+func (app *Application) logAuditEvent(r *http.Request, action, entityType string, entityID int) {
+	user := contextGetUser(r.Context())
+	if user == nil {
+		return
+	}
+
+	err := app.store.InsertAuditLog(r.Context(), data.InsertAuditLogParams{
+		UserID:     user.ID,
+		Action:     action,
+		EntityType: entityType,
+		EntityID:   entityID,
+	})
+
+	if err != nil {
+		app.logger.Error("failed to insert audio log", "error", err)
+	}
+}

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/SShogun/ControlPlane/internal/data"
+	"github.com/alexedwards/scs/pgxstore"
 	"github.com/alexedwards/scs/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -31,7 +33,7 @@ type Config struct {
 type Application struct {
 	config         Config
 	conn           *pgxpool.Pool
-	store          data.PgxStore
+	store          data.UserStore
 	sessionManager *scs.SessionManager
 	templateCache  map[string]*template.Template
 }
@@ -70,11 +72,19 @@ func main() {
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := pool.Ping(pingCtx); err != nil {
-		log.Fatal("Database not reachable: %v", err)
+		log.Fatalf("Database not reachable: %v", err)
 	}
 
 	var sessionManager *scs.SessionManager
 	sessionManager = scs.New()
+	// attach pgx-backed store for scs session manager
+	sessionManager.Store = pgxstore.New(pool)
+	sessionManager.Lifetime = 12 * time.Hour
+	sessionManager.Cookie.Name = "myapp_session"
+	sessionManager.Cookie.HttpOnly = true
+	sessionManager.Cookie.Secure = cfg.SecureCookies
+	sessionManager.Cookie.Persist = true
+	sessionManager.Cookie.SameSite = http.SameSiteStrictMode
 
 	templateCache, err := newTemplateCache("./ui/templates")
 	if err != nil {

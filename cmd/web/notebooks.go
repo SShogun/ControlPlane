@@ -15,17 +15,6 @@ type notebookForm struct {
 	Errors map[string]string
 }
 
-/*
-GET listNotebooks
-GET viewNotebook/?=id
-GET createDraftForm
-POST createDraftForm
-GET editDraftForm
-POST editDraftForm
-GET searchNotebooks
-GET notebooks/?=
-*/
-
 func (app *Application) notebookCreateForm(w http.ResponseWriter, r *http.Request) {
 	data := app.newTemplateData(r)
 	app.render(w, r, http.StatusOK, "notebook-create.page.tmpl", data)
@@ -65,7 +54,6 @@ func (app *Application) notebookCreateSubmit(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
-	// create an initial revision for the newly created notebook
 	_, err = app.store.CreateNotebookRevision(r.Context(), data.CreateNotebookRevisionParams{
 		DocumentID: id,
 		AuthorID:   user.ID,
@@ -113,7 +101,11 @@ func (app *Application) notebookView(w http.ResponseWriter, r *http.Request) {
 	if len(revisions) > 0 {
 		viewData.CurrentRevision = &revisions[0]
 	}
-	tags, _ := app.store.ListNotebookTags(r.Context(), id)
+	tags, err := app.store.ListNotebookTags(r.Context(), id)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
 	viewData.Tags = tags
 
 	app.render(w, r, http.StatusOK, "notebook-view.page.tmpl", viewData)

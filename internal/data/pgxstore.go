@@ -258,3 +258,81 @@ func (s *PgxStore) InsertAuditLog(ctx context.Context, params InsertAuditLogPara
 	_, err := s.DB.Exec(ctx, query, params.UserID, params.Action, params.EntityType, params.EntityID)
 	return err
 }
+func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) error {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	const updateRevisionQuery = `
+		UPDATE notebook_revisions
+		SET status = 'approved', updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1
+	`
+	_, err = tx.Exec(ctx, updateRevisionQuery, revisionID)
+	if err != nil {
+		return err
+	}
+
+	const updateNotebookQuery = `
+		UPDATE notebooks
+		SET current_published_revision_id = $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2
+	`
+	_, err = tx.Exec(ctx, updateNotebookQuery, revisionID, notebookID)
+	if err != nil {
+		return err
+	}
+
+	const auditQuery = `
+		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, created_at)
+		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+	`
+	_, err = tx.Exec(ctx, auditQuery, reviewerID, "revision_approved", "notebook_revision", revisionID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (s *PgxStore) ListSubmittedRevisions(ctx context.Context) ([]NotebookRevision, error) {
+	const query = `
+		SELECT id, notebook_id, author_id, title, body, status, created_at, updated_at
+		FROM notebook_revisions
+		WHERE status = 'submitted'
+		ORDER BY created_at ASC
+	`
+
+	rows, err := s.DB.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var revisions []NotebookRevision
+	for rows.Next() {
+		var rev NotebookRevision
+		err := rows.Scan(&rev.ID, &rev.NotebookID, &rev.AuthorID, &rev.Title, &rev.Body, &rev.Status, &rev.CreatedAt, &rev.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		revisions = append(revisions, rev)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return revisions, nil
+}
+
+func (s *PgxStore) UpdateRevisionStatus(ctx context.Context, params UpdateRevisionStatusParams) error {
+	const query = `
+		UPDATE notebook_revisions
+		SET status = $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2
+	`
+
+	_, err := s.DB.Exec(ctx, query, params.Status, params.ID)
+	return err
+}

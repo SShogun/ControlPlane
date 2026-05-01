@@ -77,9 +77,7 @@ func main() {
 		log.Fatalf("Database not reachable: %v", err)
 	}
 
-	var sessionManager *scs.SessionManager
-	sessionManager = scs.New()
-	// attach pgx-backed store for scs session manager
+	sessionManager := scs.New()
 	sessionManager.Store = pgxstore.New(pool)
 	sessionManager.Lifetime = 12 * time.Hour
 	sessionManager.Cookie.Name = "myapp_session"
@@ -96,6 +94,7 @@ func main() {
 	app := &Application{
 		config:         cfg,
 		conn:           pool,
+		logger:         slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		store:          &data.PgxStore{DB: pool},
 		sessionManager: sessionManager,
 		templateCache:  templateCache,
@@ -108,5 +107,7 @@ func main() {
 		WriteTimeout: 30 * time.Second,
 	}
 
-	server.ListenAndServe()
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("server failed: %v", err)
+	}
 }

@@ -3,8 +3,10 @@ package web
 import (
 	"bytes"
 	"net/http"
+	"strconv"
 
 	"github.com/SShogun/ControlPlane/internal/data"
+	"github.com/go-chi/chi/v5"
 )
 
 type templateData struct {
@@ -17,6 +19,7 @@ type templateData struct {
 	Notebooks       []data.Notebook
 	CurrentRevision *data.NotebookRevision
 	Tags            []data.Tag
+	Revisions       []data.NotebookRevision
 }
 
 func (app *Application) render(w http.ResponseWriter, r *http.Request, status int, page string, data *templateData) {
@@ -33,7 +36,9 @@ func (app *Application) render(w http.ResponseWriter, r *http.Request, status in
 	}
 
 	w.WriteHeader(status)
-	buf.WriteTo(w)
+	if _, err := buf.WriteTo(w); err != nil {
+		app.logger.Error("failed to write response", "error", err)
+	}
 }
 
 func (app *Application) newTemplateData(r *http.Request) *templateData {
@@ -59,6 +64,20 @@ func (app *Application) logAuditEvent(r *http.Request, action, entityType string
 	})
 
 	if err != nil {
-		app.logger.Error("failed to insert audio log", "error", err)
+		app.logger.Error("failed to insert audit log", "error", err)
 	}
+}
+
+func (app *Application) readIDParam(r *http.Request, name string) int {
+	idStr := chi.URLParam(r, name)
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
+func (app *Application) serverError(w http.ResponseWriter, err error) {
+	app.logger.Error("server error", "error", err)
+	http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 }

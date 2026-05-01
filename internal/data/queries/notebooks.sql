@@ -1,4 +1,4 @@
--- Get a single notebook by ID (viewNotebook)
+-- name: GetNotebookByID :one
 SELECT
 	id,
 	title,
@@ -7,9 +7,9 @@ SELECT
 	created_at,
 	updated_at
 FROM notebooks
-WHERE id = ?;
+WHERE id = $1;
 
--- List all published notebooks (listNotebooks)
+-- name: ListPublishedNotebooks :many
 SELECT
 	id,
 	title,
@@ -18,19 +18,19 @@ SELECT
 	created_at,
 	updated_at
 FROM notebooks
-WHERE is_published = 1
+WHERE is_published = true
 ORDER BY created_at DESC;
 
--- Update an existing draft (editDraftForm)
+-- name: UpdateNotebookDraft :exec
 UPDATE notebooks
 SET
-	title = ?,
-	content = ?,
+	title = $1,
+	content = $2,
 	updated_at = CURRENT_TIMESTAMP
-WHERE id = ?
-	AND is_published = 0;
+WHERE id = $3
+	AND is_published = false;
 
--- Search notebooks by title or content (searchNotebooks)
+-- name: SearchNotebooks :many
 SELECT
 	id,
 	title,
@@ -39,6 +39,7 @@ SELECT
 	created_at,
 	updated_at
 FROM notebooks
-WHERE title LIKE '%' || ? || '%'
-	 OR content LIKE '%' || ? || '%'
+WHERE title ILIKE '%' || $1 || '%'
+	 OR content ILIKE '%' || $2 || '%'
 ORDER BY created_at DESC;
+

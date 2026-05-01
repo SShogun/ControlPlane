@@ -2,16 +2,14 @@ package data
 
 import (
 	"context"
-	"net/http"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 type User struct {
 	ID           int
 	Email        string
 	PasswordHash []byte
+	Role         string
 }
 
 type Team struct {
@@ -57,7 +55,6 @@ type UserStore interface {
 	ListNotebooks(ctx context.Context) ([]Notebook, error)
 	NotebookView(ctx context.Context, id int) ([]Notebook, error)
 	CreateDraft(ctx context.Context, params CreateDraftParams) (int, error)
-	// 2nd set of methods
 	ListTeams(ctx context.Context) ([]Team, error)
 	GetTeam(ctx context.Context, id int) (Team, error)
 	AddMembership(ctx context.Context, userID, teamID int, role string) error
@@ -66,8 +63,10 @@ type UserStore interface {
 	CreateTag(ctx context.Context, name string) (int, error)
 	AttachTag(ctx context.Context, notebookID, tagID int) error
 	ListNotebookTags(ctx context.Context, notebookID int) ([]Tag, error)
-	// Audit logging
 	InsertAuditLog(ctx context.Context, params InsertAuditLogParams) error
+	ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) error
+	ListSubmittedRevisions(ctx context.Context) ([]NotebookRevision, error)
+	UpdateRevisionStatus(ctx context.Context, params UpdateRevisionStatusParams) error
 }
 
 type Notebook struct {
@@ -104,50 +103,7 @@ type InsertAuditLogParams struct {
 	EntityID   int
 }
 
-type SessionManager interface {
-	RenewToken(ctx context.Context) error
-	Put(ctx context.Context, key string, value interface{})
-}
-
-type Application struct {
-	store          UserStore
-	sessionManager SessionManager
-}
-
-func (app *Application) LoginSubmit(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseForm()
-	if err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
-
-	email := r.PostForm.Get("email")
-	plaintextPassword := r.PostForm.Get("password")
-
-	user, err := app.store.GetUserByEmail(r.Context(), email)
-	if err != nil {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-		return
-	}
-
-	err = bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(plaintextPassword))
-	if err != nil {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-		return
-	}
-
-	err = app.sessionManager.RenewToken(r.Context())
-	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	app.sessionManager.Put(r.Context(), "userID", user.ID)
-	app.sessionManager.Put(r.Context(), "flash", "Welcome back!")
-
-	http.Redirect(w, r, "/notebook/list", http.StatusSeeOther)
-}
-
-func CheckPassword(user User, password string) bool {
-	return bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(password)) == nil
+type UpdateRevisionStatusParams struct {
+	ID     int
+	Status string
 }

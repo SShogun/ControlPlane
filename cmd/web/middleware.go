@@ -15,8 +15,8 @@ func (app *Application) authenticate(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := contextSetUser(r.Context(), &user) // basically now the context is stapled (quite literally) with the user database profile
-		next.ServeHTTP(w, r.WithContext(ctx))     // passing forward the request which has the new context in it
+		ctx := contextSetUser(r.Context(), &user)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -29,4 +29,20 @@ func (app *Application) requireAuthentication(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (app *Application) requireRole(role string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user := contextGetUser(r.Context())
+
+			if user == nil || user.Role != role {
+				app.sessionManager.Put(r.Context(), "flash", "You do not have permission to do that.")
+				http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }

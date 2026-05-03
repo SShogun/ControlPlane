@@ -1,6 +1,10 @@
-name: Go
+name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 jobs:
   test-and-build:
@@ -8,7 +12,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:16
         env:
           POSTGRES_USER: testuser
           POSTGRES_PASSWORD: testpassword
@@ -30,15 +34,23 @@ jobs:
         with:
           go-version: 'stable'
 
-      - name: Run Go Tests
-        env: 
-          TEST_DB_DSN: postgres://testuser:testpassword@localhost:5432/controlplane_test?sslmode=disable
-        run: go test -v ./...
+      - name: Apply migrations
+        env:
+          PGPASSWORD: testpassword
+        run: |
+          for f in migrations/*.sql; do
+            psql -h localhost -U testuser -d controlplane_test -f "$f"
+          done
 
-      - name: Build Application
+      - name: Run Go tests
+        env:
+          TEST_DB_DSN: postgres://testuser:testpassword@localhost:5432/controlplane_test?sslmode=disable
+        run: go test -v -count=1 ./...
+
+      - name: Build application
         run: go build -v ./...
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.60
+          version: v1.64

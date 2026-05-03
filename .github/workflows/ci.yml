@@ -1,0 +1,31 @@
+name: CI Pipeline
+
+# the trigger - what wakes up the bot in GitHub
+on:
+  push: 
+    branches: ["main"]
+  pull request:
+    brances: ["main"]
+
+# the environment - which OS 
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    # steps / actions we take in the workflow
+    steps:
+      # we first download our repo's code into ubuntu server
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      # then we setup go in here
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.0' #matched with the go version in go.mod
+      # robot runs tests
+      - name: Run Go tests
+        run: go test -v ./...
+      # robot verifies if the app can successfully compile
+      - name: Build application 
+        run: go build -v ./...
+

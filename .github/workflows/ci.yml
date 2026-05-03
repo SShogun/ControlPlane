@@ -4,7 +4,7 @@ name: CI Pipeline
 on:
   push: 
     branches: ["main"]
-  pull request:
+  pull_request:
     brances: ["main"]
 
 # the environment - which OS 

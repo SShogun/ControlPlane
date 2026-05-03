@@ -1,6 +1,6 @@
 module github.com/SShogun/ControlPlane
 
-go 1.25.0
+go 1.20
 
 require (
 	github.com/alexedwards/scs/pgxstore v0.0.0-20251002162104-209de6e426de

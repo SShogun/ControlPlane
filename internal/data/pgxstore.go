@@ -251,8 +251,8 @@ func scanUser(row pgx.Row) (User, error) {
 
 func (s *PgxStore) InsertAuditLog(ctx context.Context, params InsertAuditLogParams) error {
 	const query = `
-		INSERT INTO audit_events (user_id, action, entity_type, entity_id, created_at)
-		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id)
+		VALUES ($1, $2, $3, $4)
 	`
 
 	_, err := s.DB.Exec(ctx, query, params.UserID, params.Action, params.EntityType, params.EntityID)

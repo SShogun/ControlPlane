@@ -42,7 +42,7 @@ func (app *Application) routes() http.Handler {
 
 	r.Get("/", app.home)
 	r.Get("/login", app.loginForm)
-	r.Post("/login", app.loginSubmit)
+	r.With(app.rateLimitLogin).Post("/login", app.loginSubmit)
 
 	r.Group(func(r chi.Router) {
 		r.Use(app.requireAuthentication)

@@ -6,13 +6,15 @@ import (
 	"strconv"
 
 	"github.com/SShogun/ControlPlane/internal/data"
+	"github.com/SShogun/ControlPlane/internal/validator"
 	"github.com/go-chi/chi/v5"
 )
 
+// notebookForm carries user input and validation state for notebook create/edit.
 type notebookForm struct {
-	Title  string
-	Body   string
-	Errors map[string]string
+	Title string
+	Body  string
+	validator.Validator
 }
 
 func (app *Application) notebookCreateForm(w http.ResponseWriter, r *http.Request) {
@@ -29,19 +31,18 @@ func (app *Application) notebookCreateSubmit(w http.ResponseWriter, r *http.Requ
 	}
 
 	form := notebookForm{
-		Title:  r.PostForm.Get("title"),
-		Body:   r.PostForm.Get("body"),
-		Errors: map[string]string{},
+		Title: r.PostForm.Get("title"),
+		Body:  r.PostForm.Get("body"),
 	}
 
-	if form.Title == "" {
-		form.Errors["title"] = "Title is required"
-	}
+	form.Check(validator.NotBlank(form.Title), "title", "Title is required")
+	form.Check(validator.MaxChars(form.Title, 200), "title", "Title must be 200 characters or less")
+	form.Check(validator.MaxChars(form.Body, 50000), "body", "Body must be 50,000 characters or less")
 
-	if len(form.Errors) > 0 {
-		data := app.newTemplateData(r)
-		data.Form = form
-		app.render(w, r, http.StatusUnprocessableEntity, "notebook-create.page.tmpl", data)
+	if !form.Valid() {
+		td := app.newTemplateData(r)
+		td.Form = form
+		app.render(w, r, http.StatusUnprocessableEntity, "notebook-create.page.tmpl", td)
 		return
 	}
 
@@ -86,7 +87,7 @@ func (app *Application) listNotebooks(w http.ResponseWriter, r *http.Request) {
 func (app *Application) notebookView(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.Atoi(idStr)
-	if err != nil {
+	if err != nil || !validator.PositiveInt(id) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}

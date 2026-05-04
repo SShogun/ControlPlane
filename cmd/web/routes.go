@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/gorilla/csrf"
 )
 
 func (app *Application) routes() http.Handler {
@@ -16,6 +17,27 @@ func (app *Application) routes() http.Handler {
 	r.Use(middleware.Recoverer)
 
 	r.Use(app.sessionManager.LoadAndSave)
+	if !app.config.SecureCookies {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				next.ServeHTTP(w, csrf.PlaintextHTTPRequest(r))
+			})
+		})
+	}
+
+	csrfMiddleware := csrf.Protect(
+		app.config.CSRFSecret,
+		csrf.Secure(app.config.SecureCookies),
+		csrf.Path("/"),
+		csrf.CookieName("csrf_token"),
+		csrf.FieldName("csrf_token"),
+		csrf.ErrorHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			app.logger.Error("CSRF error", "reason", csrf.FailureReason(r), "host", r.Host, "referer", r.Referer())
+			http.Error(w, csrf.FailureReason(r).Error(), http.StatusForbidden)
+		})),
+	)
+	r.Use(csrfMiddleware)
+
 	r.Use(app.authenticate)
 
 	r.Get("/", app.home)

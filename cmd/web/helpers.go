@@ -7,6 +7,7 @@ import (
 
 	"github.com/SShogun/ControlPlane/internal/data"
 	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/csrf"
 )
 
 type templateData struct {
@@ -47,6 +48,7 @@ func (app *Application) newTemplateData(r *http.Request) *templateData {
 		Flash:           app.sessionManager.PopString(r.Context(), "flash"),
 		User:            user,
 		IsAuthenticated: user != nil,
+		CSRFToken:       csrf.Token(r),
 	}
 }
 

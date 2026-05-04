@@ -111,3 +111,79 @@ func TestNotebookViewRendersRevisionAndTags(t *testing.T) {
 		t.Fatalf("expected latest revision and tag count; got %q", got)
 	}
 }
+
+func TestNotebookCreateSubmitRejectsTitleTooLong(t *testing.T) {
+	store := newFakeStore()
+	app := newTestApplication(store, map[string]*template.Template{
+		"notebook-create.page.tmpl": parseTemplate("notebook-create.page.tmpl", "error"),
+	})
+	user := &data.User{ID: 7, Email: "author@example.com"}
+
+	longTitle := strings.Repeat("a", 201)
+	form := url.Values{
+		"title": {longTitle},
+		"body":  {"valid body"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/notebooks/new", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(contextSetUser(req.Context(), user))
+
+	rr := serveWithSession(app, app.notebookCreateSubmit, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected status %d; got %d", http.StatusUnprocessableEntity, rr.Code)
+	}
+	if store.createDraftCalled {
+		t.Fatal("CreateDraft should not be called when title exceeds max length")
+	}
+}
+
+func TestNotebookCreateSubmitRejectsBodyTooLong(t *testing.T) {
+	store := newFakeStore()
+	app := newTestApplication(store, map[string]*template.Template{
+		"notebook-create.page.tmpl": parseTemplate("notebook-create.page.tmpl", "error"),
+	})
+	user := &data.User{ID: 7, Email: "author@example.com"}
+
+	longBody := strings.Repeat("x", 50001)
+	form := url.Values{
+		"title": {"Valid Title"},
+		"body":  {longBody},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/notebooks/new", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = req.WithContext(contextSetUser(req.Context(), user))
+
+	rr := serveWithSession(app, app.notebookCreateSubmit, req)
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected status %d; got %d", http.StatusUnprocessableEntity, rr.Code)
+	}
+	if store.createDraftCalled {
+		t.Fatal("CreateDraft should not be called when body exceeds max length")
+	}
+}
+
+func TestNotebookViewRejectsZeroID(t *testing.T) {
+	app := newTestApplication(nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/notebooks/0", nil)
+	req = addRouteParam(req, "id", "0")
+
+	rr := serveWithSession(app, app.notebookView, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d; got %d", http.StatusBadRequest, rr.Code)
+	}
+}
+
+func TestNotebookViewRejectsNegativeID(t *testing.T) {
+	app := newTestApplication(nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/notebooks/-1", nil)
+	req = addRouteParam(req, "id", "-1")
+
+	rr := serveWithSession(app, app.notebookView, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d; got %d", http.StatusBadRequest, rr.Code)
+	}
+}

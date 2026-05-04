@@ -29,6 +29,7 @@ type Config struct {
 	Database      string `json:"database"`
 	State         State  `json:"state"`
 	SecureCookies bool   `json:"secure_cookies"`
+	CSRFSecret    []byte `json:"-"`
 }
 
 type Application struct {
@@ -59,11 +60,23 @@ func newTemplateCache(dir string) (map[string]*template.Template, error) {
 }
 
 func main() {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	csrfSecret := os.Getenv("CSRF_SECRET")
+	if csrfSecret == "" {
+		logger.Warn("CSRF_SECRET not set, using insecure development key")
+		csrfSecret = "dev-only-insecure-csrf-key!!!!!" // exactly 32 bytes
+	}
+	if len(csrfSecret) < 32 {
+		log.Fatalf("CSRF_SECRET must be at least 32 bytes; got %d", len(csrfSecret))
+	}
+
 	cfg := Config{
 		Port:          6767,
 		Database:      os.Getenv("DATABASE_URL"),
 		State:         Development,
 		SecureCookies: false,
+		CSRFSecret:    []byte(csrfSecret),
 	}
 
 	ctx := context.Background()
@@ -94,7 +107,7 @@ func main() {
 	app := &Application{
 		config:         cfg,
 		conn:           pool,
-		logger:         slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		logger:         logger,
 		store:          &data.PgxStore{DB: pool},
 		sessionManager: sessionManager,
 		templateCache:  templateCache,

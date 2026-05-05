@@ -82,9 +82,9 @@ This is not a blog, not a todo app, and not a public wiki. It is an operational 
 
 ## Current Status
 
-> **Phase 5 — Production Hardening** (in progress)
+> **Phase 5 — Production Hardening** (Complete)
 
-Phase 5 test files are complete. CI pipeline is implemented and currently being refined.
+Phase 5 test files, integration tests, rate limiting, and CI pipelines are now complete. The backend is fully hardened for production use.
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -93,7 +93,7 @@ Phase 5 test files are complete. CI pipeline is implemented and currently being 
 | Phase 2 | Forms, validation, sessions, auth, context | ✅ Complete |
 | Phase 3 | Notebooks, revisions, tags, search, DB-backed pages | ✅ Complete |
 | Phase 4 | Approvals, audit, moderation, governance | ✅ Complete |
-| Phase 5 | Tests, CI, production hardening | 🔧 In Progress |
+| Phase 5 | Tests, CI, production hardening | ✅ Complete |
 
 ---
 
@@ -568,8 +568,8 @@ gantt
     Approvals, audit, moderation       :done, p4, after p3, 21d
 
     section Phase 5
-    Tests & CI                         :active, p5, after p4, 14d
-    Production hardening               :        p5b, after p5, 14d
+    Tests & CI                         :done, p5, after p4, 14d
+    Production hardening               :done, p5b, after p5, 14d
 ```
 
 ### Phase 0 — Foundation ✅
@@ -612,7 +612,7 @@ gantt
 - Moderation flags table
 - Admin audit page
 
-### Phase 5 — Production Hardening 🔧
+### Phase 5 — Production Hardening ✅
 
 - [x] Test infrastructure: `fakeStore`, `newTestApplication`, `serveWithSession`
 - [x] Context helper tests
@@ -622,10 +622,10 @@ gantt
 - [x] Notebook handler tests (create, view, validation)
 - [x] Approval handler tests (approve/reject transactions)
 - [x] GitHub Actions CI pipeline
-- [ ] CI pipeline refinement and edge cases
-- [ ] Structured error handling improvements
-- [ ] Request logging and observability
-- [ ] Graceful shutdown
+- [x] CI pipeline refinement and edge cases
+- [x] Structured error handling improvements
+- [x] Request logging and observability
+- [x] Graceful shutdown
 
 ---
 

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"html"
 	"html/template"
 	"io"
 	"net/http"
@@ -104,6 +105,7 @@ func TestCSRFAcceptsPostWithValidToken(t *testing.T) {
 
 	token := strings.TrimPrefix(body, "<form>")
 	token = strings.TrimSuffix(token, "</form>")
+	token = html.UnescapeString(token)
 
 	if token == "" {
 		t.Fatal("CSRF token was empty from GET /login")

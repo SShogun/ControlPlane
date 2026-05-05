@@ -71,11 +71,17 @@ func main() {
 		log.Fatalf("CSRF_SECRET must be at least 32 bytes; got %d", len(csrfSecret))
 	}
 
+	stateStr := os.Getenv("ENV")
+	if stateStr == "" {
+		stateStr = string(Development)
+	}
+	state := State(stateStr)
+
 	cfg := Config{
 		Port:          6767,
 		Database:      os.Getenv("DATABASE_URL"),
-		State:         Development,
-		SecureCookies: false,
+		State:         state,
+		SecureCookies: state == Production,
 		CSRFSecret:    []byte(csrfSecret),
 	}
 

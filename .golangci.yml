@@ -1,0 +1,8 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      - path: cmd/web/main.go
+        linters:
+          - unused

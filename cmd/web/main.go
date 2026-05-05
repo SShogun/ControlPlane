@@ -34,7 +34,6 @@ type Config struct {
 
 type Application struct {
 	config         Config
-	conn           *pgxpool.Pool
 	logger         *slog.Logger
 	store          data.UserStore
 	sessionManager *scs.SessionManager
@@ -112,7 +111,6 @@ func main() {
 
 	app := &Application{
 		config:         cfg,
-		conn:           pool,
 		logger:         logger,
 		store:          &data.PgxStore{DB: pool},
 		sessionManager: sessionManager,

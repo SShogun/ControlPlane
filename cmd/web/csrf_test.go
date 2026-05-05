@@ -39,6 +39,16 @@ func newCSRFTestApp(store *fakeStore) (*Application, http.Handler) {
 	return app, app.routes()
 }
 
+func closeResponseBody(t *testing.T, resp *http.Response) {
+	t.Helper()
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("failed to close response body: %v", err)
+	}
+}
+
 func TestCSRFRejectsPostWithoutToken(t *testing.T) {
 	_, handler := newCSRFTestApp(nil)
 	ts := httptest.NewServer(handler)
@@ -54,8 +64,11 @@ func TestCSRFRejectsPostWithoutToken(t *testing.T) {
 	}
 
 	// GET /login to establish CSRF cookie.
-	_, err := client.Get(ts.URL + "/login")
+	loginResp, err := client.Get(ts.URL + "/login")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loginResp.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -67,7 +80,7 @@ func TestCSRFRejectsPostWithoutToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(t, resp)
 
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected status %d for POST without CSRF token; got %d", http.StatusForbidden, resp.StatusCode)
@@ -95,7 +108,7 @@ func TestCSRFAcceptsPostWithValidToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer getResp.Body.Close()
+	defer closeResponseBody(t, getResp)
 
 	bodyBytes, err := io.ReadAll(getResp.Body)
 	if err != nil {
@@ -128,10 +141,13 @@ func TestCSRFAcceptsPostWithValidToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(t, resp)
 
-	boBytes, err := io.ReadAll(resp.Body)
-	respBody := string(boBytes)
+	bodyBytes, err = io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respBody := string(bodyBytes)
 
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("expected status %d for POST with valid CSRF token; got %d (body: %s)", http.StatusSeeOther, resp.StatusCode, respBody)
@@ -150,7 +166,7 @@ func TestCSRFTokenRenderedInLoginForm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(t, resp)
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected status %d; got %d", http.StatusOK, resp.StatusCode)

@@ -258,12 +258,17 @@ func (s *PgxStore) InsertAuditLog(ctx context.Context, params InsertAuditLogPara
 	_, err := s.DB.Exec(ctx, query, params.UserID, params.Action, params.EntityType, params.EntityID)
 	return err
 }
-func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) error {
+func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) (err error) {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		rollbackErr := tx.Rollback(ctx)
+		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			err = errors.Join(err, rollbackErr)
+		}
+	}()
 
 	const updateRevisionQuery = `
 		UPDATE notebook_revisions
@@ -294,7 +299,8 @@ func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID
 		return err
 	}
 
-	return tx.Commit(ctx)
+	err = tx.Commit(ctx)
+	return err
 }
 
 func (s *PgxStore) ListSubmittedRevisions(ctx context.Context) ([]NotebookRevision, error) {

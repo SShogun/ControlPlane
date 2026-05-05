@@ -156,46 +156,6 @@ func (m *mockStore) UpdateRevisionStatus(ctx context.Context, params data.Update
 	return nil
 }
 
-// mockSessionManager is a fake use case of scs.SessionManager
-type mockSessionManager struct {
-	data map[string]interface{}
-}
-
-func newMockSessionManager() *mockSessionManager {
-	return &mockSessionManager{
-		data: make(map[string]interface{}),
-	}
-}
-
-func (m *mockSessionManager) RenewToken(ctx context.Context) error {
-	return nil
-}
-
-func (m *mockSessionManager) Put(ctx context.Context, key string, value interface{}) {
-	m.data[key] = value
-}
-
-func (m *mockSessionManager) PopString(ctx context.Context, key string) string {
-	v, ok := m.data[key]
-	if !ok {
-		return ""
-	}
-	delete(m.data, key)
-	return v.(string)
-}
-
-func (m *mockSessionManager) GetInt(ctx context.Context, key string) int {
-	v, ok := m.data[key]
-	if !ok {
-		return 0
-	}
-	return v.(int)
-}
-
-func (m *mockSessionManager) LoadAndSave(next http.Handler) http.Handler {
-	return next
-}
-
 // Tests
 
 // unauthenticated requests redirect to /login.

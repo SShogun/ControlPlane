@@ -20,6 +20,10 @@
                     <li><a href="/approvals">Approvals</a></li>
                     <li><a href="/moderation">Moderation</a></li>
                     {{end}}
+                    {{if eq .User.Role "admin"}}
+                    <li><a href="/admin/teams">Teams</a></li>
+                    <li><a href="/admin/audit">Audit</a></li>
+                    {{end}}
                     <li>
                         <form action="/logout" method="POST" style="display:inline;">
                             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">

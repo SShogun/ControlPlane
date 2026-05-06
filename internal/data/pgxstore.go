@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,6 +52,7 @@ func (s *PgxStore) AddMembership(ctx context.Context, userID, teamID int, role s
 	const query = `
 		INSERT INTO memberships (user_id, team_id, role)
 		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, team_id) DO UPDATE SET role = EXCLUDED.role
 	`
 
 	_, err := s.DB.Exec(ctx, query, userID, teamID, role)
@@ -59,6 +61,33 @@ func (s *PgxStore) AddMembership(ctx context.Context, userID, teamID int, role s
 	}
 
 	return nil
+}
+
+func (s *PgxStore) CreateUser(ctx context.Context, params CreateUserParams) (int, error) {
+	const query = `
+		INSERT INTO users (email, password_hash)
+		VALUES ($1, $2)
+		ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = CURRENT_TIMESTAMP
+		RETURNING id
+	`
+
+	var id int
+	if err := s.DB.QueryRow(ctx, query, params.Email, params.PasswordHash).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func (s *PgxStore) DeleteNotebook(ctx context.Context, notebookID int) error {
+	const query = `DELETE FROM notebooks WHERE id = $1`
+	_, err := s.DB.Exec(ctx, query, notebookID)
+	return err
+}
+
+func (s *PgxStore) DeleteNotebookRevision(ctx context.Context, revisionID int) error {
+	const query = `DELETE FROM notebook_revisions WHERE id = $1`
+	_, err := s.DB.Exec(ctx, query, revisionID)
+	return err
 }
 
 func (s *PgxStore) CreateNotebookRevision(ctx context.Context, params CreateNotebookRevisionParams) (int, error) {
@@ -77,12 +106,13 @@ func (s *PgxStore) CreateNotebookRevision(ctx context.Context, params CreateNote
 }
 
 func (s *PgxStore) ListNotebookRevisions(ctx context.Context, notebookID int) ([]NotebookRevision, error) {
-
 	const query = `
-		SELECT id, notebook_id, author_id, title, body, status, created_at, updated_at
-		FROM notebook_revisions
-		WHERE notebook_id = $1
-		ORDER BY created_at DESC
+		SELECT nr.id, nr.notebook_id, nr.author_id, nr.title, nr.body, nr.status,
+		       COALESCE(a.note, '') AS review_note, nr.created_at, nr.updated_at
+		FROM notebook_revisions nr
+		LEFT JOIN approvals a ON a.notebook_revision_id = nr.id
+		WHERE nr.notebook_id = $1
+		ORDER BY nr.created_at DESC
 	`
 
 	rows, err := s.DB.Query(ctx, query, notebookID)
@@ -94,7 +124,7 @@ func (s *PgxStore) ListNotebookRevisions(ctx context.Context, notebookID int) ([
 	var revisions []NotebookRevision
 	for rows.Next() {
 		var rev NotebookRevision
-		err := rows.Scan(&rev.ID, &rev.NotebookID, &rev.AuthorID, &rev.Title, &rev.Body, &rev.Status, &rev.CreatedAt, &rev.UpdatedAt)
+		err := rows.Scan(&rev.ID, &rev.NotebookID, &rev.AuthorID, &rev.Title, &rev.Body, &rev.Status, &rev.ReviewNote, &rev.CreatedAt, &rev.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -355,11 +385,12 @@ func (s *PgxStore) UpdateDraft(ctx context.Context, params UpdateDraftParams) (r
 
 func (s *PgxStore) ListRecentDrafts(ctx context.Context, authorID int) ([]NotebookRevision, error) {
 	const query = `
-		SELECT id, notebook_id, author_id, title, body, status, created_at, updated_at
-		FROM notebook_revisions
-		WHERE author_id = $1
-		  AND status = 'draft'
-		ORDER BY updated_at DESC
+		SELECT nr.id, nr.notebook_id, nr.author_id, nr.title, nr.body, nr.status,
+		       COALESCE(a.note, '') AS review_note, nr.created_at, nr.updated_at
+		FROM notebook_revisions nr
+		LEFT JOIN approvals a ON a.notebook_revision_id = nr.id
+		WHERE nr.author_id = $1
+		ORDER BY nr.updated_at DESC
 		LIMIT 6
 	`
 
@@ -372,7 +403,7 @@ func (s *PgxStore) ListRecentDrafts(ctx context.Context, authorID int) ([]Notebo
 	var revisions []NotebookRevision
 	for rows.Next() {
 		var rev NotebookRevision
-		if err := rows.Scan(&rev.ID, &rev.NotebookID, &rev.AuthorID, &rev.Title, &rev.Body, &rev.Status, &rev.CreatedAt, &rev.UpdatedAt); err != nil {
+		if err := rows.Scan(&rev.ID, &rev.NotebookID, &rev.AuthorID, &rev.Title, &rev.Body, &rev.Status, &rev.ReviewNote, &rev.CreatedAt, &rev.UpdatedAt); err != nil {
 			return nil, err
 		}
 		revisions = append(revisions, rev)
@@ -382,9 +413,11 @@ func (s *PgxStore) ListRecentDrafts(ctx context.Context, authorID int) ([]Notebo
 
 func (s *PgxStore) ListAuditEvents(ctx context.Context) ([]AuditEvent, error) {
 	const query = `
-		SELECT id, COALESCE(actor_id, 0), event_type, entity_type, entity_id, created_at
-		FROM audit_events
-		ORDER BY created_at DESC
+		SELECT ae.id, COALESCE(ae.actor_id, 0), ae.event_type, ae.entity_type, ae.entity_id,
+			   COALESCE(u.email, ''), COALESCE(ae.details::text, ''), ae.created_at
+		FROM audit_events ae
+		LEFT JOIN users u ON ae.actor_id = u.id
+		ORDER BY ae.created_at DESC
 		LIMIT 100
 	`
 
@@ -397,7 +430,7 @@ func (s *PgxStore) ListAuditEvents(ctx context.Context) ([]AuditEvent, error) {
 	var events []AuditEvent
 	for rows.Next() {
 		var event AuditEvent
-		if err := rows.Scan(&event.ID, &event.ActorID, &event.EventType, &event.EntityType, &event.EntityID, &event.CreatedAt); err != nil {
+		if err := rows.Scan(&event.ID, &event.ActorID, &event.EventType, &event.EntityType, &event.EntityID, &event.ActorEmail, &event.Details, &event.CreatedAt); err != nil {
 			return nil, err
 		}
 		events = append(events, event)
@@ -418,14 +451,21 @@ func scanUser(row pgx.Row) (User, error) {
 
 func (s *PgxStore) InsertAuditLog(ctx context.Context, params InsertAuditLogParams) error {
 	const query = `
-		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, details)
+		VALUES ($1, $2, $3, $4, $5::jsonb)
 	`
 
-	_, err := s.DB.Exec(ctx, query, params.UserID, params.Action, params.EntityType, params.EntityID)
+	var details interface{}
+	if params.Details == "" {
+		details = nil
+	} else {
+		details = params.Details
+	}
+
+	_, err := s.DB.Exec(ctx, query, params.UserID, params.Action, params.EntityType, params.EntityID, details)
 	return err
 }
-func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) (err error) {
+func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int, note string) (err error) {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return err
@@ -464,19 +504,25 @@ func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID
 	}
 
 	const auditQuery = `
-		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, created_at)
-		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, details, created_at)
+		VALUES ($1, $2, $3, $4, $5::jsonb, CURRENT_TIMESTAMP)
 	`
-	_, err = tx.Exec(ctx, auditQuery, reviewerID, "revision_approved", "notebook_revision", revisionID)
+	var details interface{}
+	if note == "" {
+		details = nil
+	} else {
+		details = fmt.Sprintf(`{"note": %q}`, note)
+	}
+	_, err = tx.Exec(ctx, auditQuery, reviewerID, "revision_approved", "notebook_revision", revisionID, details)
 	if err != nil {
 		return err
 	}
 
 	const approvalQuery = `
-		INSERT INTO approvals (notebook_revision_id, reviewer_id, decision, created_at)
-		VALUES ($1, $2, 'approved', CURRENT_TIMESTAMP)
+		INSERT INTO approvals (notebook_revision_id, reviewer_id, decision, note, created_at)
+		VALUES ($1, $2, 'approved', $3, CURRENT_TIMESTAMP)
 	`
-	_, err = tx.Exec(ctx, approvalQuery, revisionID, reviewerID)
+	_, err = tx.Exec(ctx, approvalQuery, revisionID, reviewerID, note)
 	if err != nil {
 		return err
 	}
@@ -485,7 +531,7 @@ func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID
 	return err
 }
 
-func (s *PgxStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID int) (err error) {
+func (s *PgxStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID int, note string) (err error) {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return err
@@ -508,19 +554,25 @@ func (s *PgxStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID 
 	}
 
 	const approvalQuery = `
-		INSERT INTO approvals (notebook_revision_id, reviewer_id, decision, created_at)
-		VALUES ($1, $2, 'rejected', CURRENT_TIMESTAMP)
+		INSERT INTO approvals (notebook_revision_id, reviewer_id, decision, note, created_at)
+		VALUES ($1, $2, 'rejected', $3, CURRENT_TIMESTAMP)
 	`
-	_, err = tx.Exec(ctx, approvalQuery, revisionID, reviewerID)
+	_, err = tx.Exec(ctx, approvalQuery, revisionID, reviewerID, note)
 	if err != nil {
 		return err
 	}
 
 	const auditQuery = `
-		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, created_at)
-		VALUES ($1, 'revision_rejected', 'notebook_revision', $2, CURRENT_TIMESTAMP)
+		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, details, created_at)
+		VALUES ($1, 'revision_rejected', 'notebook_revision', $2, $3::jsonb, CURRENT_TIMESTAMP)
 	`
-	_, err = tx.Exec(ctx, auditQuery, reviewerID, revisionID)
+	var details interface{}
+	if note == "" {
+		details = nil
+	} else {
+		details = fmt.Sprintf(`{"note": %q}`, note)
+	}
+	_, err = tx.Exec(ctx, auditQuery, reviewerID, revisionID, details)
 	if err != nil {
 		return err
 	}

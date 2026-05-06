@@ -12,25 +12,27 @@
     <table>
         <thead style="background: rgba(15, 23, 42, 0.6);">
             <tr>
+                <th>When</th>
                 <th>Action</th>
-                <th>Entity Type</th>
-                <th>Entity ID</th>
-                <th>Actor ID</th>
+                <th>Entity</th>
+                <th>Actor</th>
+                <th>Details</th>
             </tr>
         </thead>
         <tbody>
             {{if .AuditEvents}}
             {{range .AuditEvents}}
             <tr>
+                <td class="mono" style="font-size:0.85rem;color:var(--text-secondary);">{{.CreatedAt}}</td>
                 <td>{{.EventType}}</td>
-                <td>{{.EntityType}}</td>
-                <td>{{.EntityID}}</td>
-                <td>{{.ActorID}}</td>
+                <td>{{.EntityType}} #{{.EntityID}}</td>
+                <td>{{if .ActorEmail}}{{.ActorEmail}}{{else}}User#{{.ActorID}}{{end}}</td>
+                <td style="max-width:420px; white-space:pre-wrap;">{{.Details}}</td>
             </tr>
             {{end}}
             {{else}}
             <tr>
-                <td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 2rem;">
+                <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 2rem;">
                     No audit events recorded yet.
                 </td>
             </tr>

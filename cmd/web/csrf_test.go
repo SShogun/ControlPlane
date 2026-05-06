@@ -29,6 +29,7 @@ func newCSRFTestApp(store *fakeStore) (*Application, http.Handler) {
 		"notebook-edit.page.tmpl":    parseTemplate("notebook-edit.page.tmpl", "edit"),
 		"notebooks-search.page.tmpl": parseTemplate("notebooks-search.page.tmpl", "search"),
 		"approval-queue.page.tmpl":   parseTemplate("approval-queue.page.tmpl", "approvals"),
+		"admin-teams.page.tmpl":      parseTemplate("admin-teams.page.tmpl", "teams"),
 		"admin-audit.page.tmpl":      parseTemplate("admin-audit.page.tmpl", "audit"),
 	}
 

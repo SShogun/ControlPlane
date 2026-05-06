@@ -11,6 +11,10 @@ type User struct {
 	PasswordHash []byte
 	Role         string
 }
+type CreateUserParams struct {
+	Email        string
+	PasswordHash []byte
+}
 
 type Team struct {
 	ID        int
@@ -33,6 +37,7 @@ type NotebookRevision struct {
 	Title      string
 	Body       string
 	Status     string
+	ReviewNote string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
@@ -50,6 +55,8 @@ type AuditEvent struct {
 	EntityType string
 	EntityID   int
 	CreatedAt  time.Time
+	ActorEmail string
+	Details    string
 }
 
 type ModerationFlag struct {
@@ -70,6 +77,7 @@ type UserStore interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUser(ctx context.Context, id int) (User, error)
 	CheckPassword(user User, password string) bool
+	CreateUser(ctx context.Context, params CreateUserParams) (int, error)
 	ListNotebooks(ctx context.Context) ([]Notebook, error)
 	SearchNotebooks(ctx context.Context, query string) ([]Notebook, error)
 	NotebookView(ctx context.Context, id int) ([]Notebook, error)
@@ -77,6 +85,8 @@ type UserStore interface {
 	UpdateDraft(ctx context.Context, params UpdateDraftParams) (int, error)
 	ListRecentDrafts(ctx context.Context, authorID int) ([]NotebookRevision, error)
 	ListAuditEvents(ctx context.Context) ([]AuditEvent, error)
+	DeleteNotebook(ctx context.Context, notebookID int) error
+	DeleteNotebookRevision(ctx context.Context, revisionID int) error
 	ListTeams(ctx context.Context) ([]Team, error)
 	GetTeam(ctx context.Context, id int) (Team, error)
 	AddMembership(ctx context.Context, userID, teamID int, role string) error
@@ -86,8 +96,8 @@ type UserStore interface {
 	AttachTag(ctx context.Context, notebookID, tagID int) error
 	ListNotebookTags(ctx context.Context, notebookID int) ([]Tag, error)
 	InsertAuditLog(ctx context.Context, params InsertAuditLogParams) error
-	ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) error
-	RejectRevisionTx(ctx context.Context, revisionID, reviewerID int) error
+	ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int, note string) error
+	RejectRevisionTx(ctx context.Context, revisionID, reviewerID int, note string) error
 	ListSubmittedRevisions(ctx context.Context) ([]NotebookRevision, error)
 	UpdateRevisionStatus(ctx context.Context, params UpdateRevisionStatusParams) error
 	CreateModerationFlag(ctx context.Context, params CreateModerationFlagParams) (int, error)
@@ -136,6 +146,7 @@ type InsertAuditLogParams struct {
 	Action     string
 	EntityType string
 	EntityID   int
+	Details    string
 }
 
 type UpdateRevisionStatusParams struct {

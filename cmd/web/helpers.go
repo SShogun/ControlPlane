@@ -17,6 +17,7 @@ type templateData struct {
 	Form            any
 	Errors          map[string]string
 	CSRFToken       string
+	Teams           []data.Team
 	Notebooks       []data.Notebook
 	CurrentRevision *data.NotebookRevision
 	Tags            []data.Tag
@@ -55,7 +56,7 @@ func (app *Application) newTemplateData(r *http.Request) *templateData {
 	}
 }
 
-func (app *Application) logAuditEvent(r *http.Request, action, entityType string, entityID int) {
+func (app *Application) logAuditEvent(r *http.Request, action, entityType string, entityID int, details string) {
 	user := contextGetUser(r.Context())
 	if user == nil {
 		return
@@ -66,6 +67,7 @@ func (app *Application) logAuditEvent(r *http.Request, action, entityType string
 		Action:     action,
 		EntityType: entityType,
 		EntityID:   entityID,
+		Details:    details,
 	})
 
 	if err != nil {

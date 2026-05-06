@@ -1,0 +1,40 @@
+{{template "base" .}}
+
+{{define "title"}}Review Revision{{end}}
+
+{{define "main"}}
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2rem;">
+    <div>
+        <h2 style="font-size:2rem;">{{.CurrentRevision.Title}}</h2>
+        <p style="color:var(--text-secondary)">Notebook ID: <span class="mono">{{.CurrentRevision.NotebookID}}</span> | Author: #{{.CurrentRevision.AuthorID}}</p>
+    </div>
+</div>
+
+<div class="card" style="padding:2rem;margin-bottom:1.5rem;">
+    <div style="white-space:pre-wrap;line-height:1.8;">{{.CurrentRevision.Body}}</div>
+</div>
+
+<div style="display:flex;gap:1rem;">
+    <form action="/approvals/approve" method="POST" style="flex:1;">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="revision_id" value="{{.CurrentRevision.ID}}">
+        <input type="hidden" name="notebook_id" value="{{.CurrentRevision.NotebookID}}">
+        <div class="form-group">
+            <label>Optional message to author</label>
+            <textarea name="note" rows="3" placeholder="Add a note (optional)" style="width:100%;"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Approve</button>
+    </form>
+
+    <form action="/approvals/reject" method="POST" style="flex:1;">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="revision_id" value="{{.CurrentRevision.ID}}">
+        <div class="form-group">
+            <label>Reason for rejection</label>
+            <textarea name="note" rows="3" placeholder="Explain why this was rejected" style="width:100%;"></textarea>
+        </div>
+        <button type="submit" class="btn btn-danger">Reject</button>
+    </form>
+</div>
+
+{{end}}

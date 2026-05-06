@@ -59,12 +59,14 @@ func (app *Application) routes() http.Handler {
 		r.Get("/notebooks/{id}/edit", app.notebookEditForm)
 		r.Post("/notebooks/{id}/edit", app.notebookEditSubmit)
 		r.Post("/notebooks/{id}/submit", app.notebookSubmitForApproval)
+		r.Post("/notebooks/{id}/delete", app.notebookDeleteSubmit)
 		r.Post("/notebooks/{id}/flag", app.notebookFlagSubmit)
 
 		r.Group(func(r chi.Router) {
 			r.Use(app.requireRole("reviewer"))
 
 			r.Get("/approvals", app.approvalQueue)
+			r.Get("/approvals/{id}", app.approvalReviewView)
 			r.Post("/approvals/approve", app.approveRevisionSubmit)
 			r.Post("/approvals/reject", app.rejectRevisionSubmit)
 			r.Get("/moderation", app.moderationQueue)
@@ -75,6 +77,9 @@ func (app *Application) routes() http.Handler {
 	r.Route("/admin", func(r chi.Router) {
 		r.Use(app.requireAuthentication)
 		r.Use(app.requireRole("admin"))
+		r.Get("/teams", app.adminTeams)
+		r.Post("/teams", app.adminTeamOnboardSubmit)
+		r.Post("/notebooks/{id}/delete", app.adminNotebookDeleteSubmit)
 		r.Get("/audit", app.adminAudit)
 	})
 	return r
@@ -132,7 +137,7 @@ func (app *Application) resolveModerationFlagSubmit(w http.ResponseWriter, r *ht
 		app.serverError(w, err)
 		return
 	}
-	app.logAuditEvent(r, "moderation_flag_resolved", "moderation_flag", flagID)
+	app.logAuditEvent(r, "moderation_flag_resolved", "moderation_flag", flagID, "")
 	app.sessionManager.Put(r.Context(), "flash", "Moderation flag resolved.")
 	http.Redirect(w, r, "/moderation", http.StatusSeeOther)
 }

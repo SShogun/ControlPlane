@@ -14,12 +14,22 @@
     <div style="display: flex; gap: 1rem;">
         {{if eq .CurrentRevision.Status "draft"}}
         <a href="/notebooks/{{.CurrentRevision.NotebookID}}/edit" class="btn btn-outline">Edit Draft</a>
-        <form action="/notebooks/{{.CurrentRevision.NotebookID}}/submit" method="POST">
+        <form action="/notebooks/{{.CurrentRevision.NotebookID}}/delete" method="POST" class="stacked-form" style="min-width:180px;">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-            <button type="submit" class="btn btn-primary">Submit for Approval</button>
+            <button type="submit" class="btn btn-danger">Delete Draft</button>
+        </form>
+        <form action="/notebooks/{{.CurrentRevision.NotebookID}}/submit" method="POST" style="display:flex;flex-direction:column;gap:0.5rem;min-width:260px;">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <textarea name="message" rows="2" placeholder="Optional message to reviewers (explain context)" style="width:100%;"></textarea>
+            <button type="submit" class="btn btn-primary">Submit for Review</button>
         </form>
         {{else if eq .CurrentRevision.Status "submitted"}}
         <a href="/approvals" class="btn btn-outline">Awaiting Review</a>
+        {{else if and (eq .CurrentRevision.Status "approved") (eq .User.Role "admin")}}
+        <form action="/admin/notebooks/{{.CurrentRevision.NotebookID}}/delete" method="POST" class="stacked-form" style="min-width:180px;">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <button type="submit" class="btn btn-danger">Delete Notebook</button>
+        </form>
         {{end}}
     </div>
 </div>
@@ -35,6 +45,13 @@
 <div class="card" style="padding: 3rem;">
     <div style="white-space: pre-wrap; font-family: var(--font-sans); line-height: 1.8;">{{.CurrentRevision.Body}}</div>
 </div>
+
+{{if and (eq .CurrentRevision.Status "rejected") .CurrentRevision.ReviewNote}}
+<div class="card status-note status-note-rejected" style="margin-top: 2rem;">
+    <strong>Rejection note</strong>
+    <p>{{.CurrentRevision.ReviewNote}}</p>
+</div>
+{{end}}
 
 <div class="card" style="margin-top: 2rem;">
     <h3 style="margin-bottom: 1rem;">Moderation</h3>

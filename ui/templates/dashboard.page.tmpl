@@ -33,14 +33,17 @@
     <div class="card">
         <h3>Admin Tools</h3>
         <p style="color: var(--text-secondary); margin-top: 0.5rem; margin-bottom: 1rem;">
-            View system audit logs.
+            Manage teams, onboard members, and review system activity.
         </p>
-        <a href="/admin/audit" class="btn btn-outline">View Audit Logs</a>
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+            <a href="/admin/teams" class="btn btn-outline">Manage Teams</a>
+            <a href="/admin/audit" class="btn btn-outline">View Audit Logs</a>
+        </div>
     </div>
     {{end}}
 </div>
 
-<h3 style="margin-top: 3rem; margin-bottom: 1rem;">Your Recent Drafts</h3>
+<h3 style="margin-top: 3rem; margin-bottom: 1rem;">Your Recent Revisions</h3>
 {{if .Revisions}}
     <div class="grid">
         {{range .Revisions}}
@@ -49,15 +52,51 @@
             <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
                 Notebook ID: <span class="mono">{{.NotebookID}}</span>
             </p>
-            <p style="margin-top: 0.75rem;">
+            <div style="display:flex; gap:0.75rem; margin-top:0.75rem; flex-wrap:wrap; align-items:center;">
+                {{if eq .Status "draft"}}
+                <span class="badge badge-blue">draft</span>
+                {{else if eq .Status "submitted"}}
+                <span class="badge badge-yellow">submitted</span>
+                {{else if eq .Status "rejected"}}
+                <span class="badge badge-red">rejected</span>
+                {{else if eq .Status "approved"}}
+                <span class="badge badge-green">approved</span>
+                {{else}}
                 <span class="badge badge-blue">{{.Status}}</span>
-            </p>
-            <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem;">
+                {{end}}
+            </div>
+            {{if eq .Status "rejected"}}
+            <div class="status-note status-note-rejected">
+                <strong>Reviewer note</strong>
+                <p>{{if .ReviewNote}}{{.ReviewNote}}{{else}}No message was attached to this rejection.{{end}}</p>
+            </div>
+            {{else if eq .Status "submitted"}}
+            <div class="status-note status-note-warn">
+                <strong>Waiting on review</strong>
+                <p>Your revision is in the approval queue.</p>
+            </div>
+            {{else if eq .Status "approved"}}
+            <div class="status-note status-note-success">
+                <strong>Published</strong>
+                <p>This revision is live.</p>
+            </div>
+            {{end}}
+            <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem; flex-wrap: wrap;">
+                <a href="/notebooks/{{.NotebookID}}" class="btn btn-outline">Open</a>
+                {{if eq .Status "draft"}}
                 <a href="/notebooks/{{.NotebookID}}/edit" class="btn btn-outline">Edit</a>
-                <form action="/notebooks/{{.NotebookID}}/submit" method="POST">
+                <form action="/notebooks/{{.NotebookID}}/delete" method="POST" class="stacked-form" style="min-width: 180px;">
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <button type="submit" class="btn btn-primary">Submit for Approval</button>
+                    <button type="submit" class="btn btn-danger">Delete Draft</button>
                 </form>
+                <form action="/notebooks/{{.NotebookID}}/submit" method="POST" class="stacked-form">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <textarea name="message" rows="2" placeholder="Optional message to reviewers"></textarea>
+                    <button type="submit" class="btn btn-primary">Submit for Review</button>
+                </form>
+                {{else if eq .Status "rejected"}}
+                <a href="/notebooks/{{.NotebookID}}/edit" class="btn btn-primary">Revise and Re-submit</a>
+                {{end}}
             </div>
         </div>
         {{end}}

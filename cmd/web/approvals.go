@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/SShogun/ControlPlane/internal/data"
 )
 
 func (app *Application) approveRevisionSubmit(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +24,13 @@ func (app *Application) approveRevisionSubmit(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	err := app.store.ApproveRevisionTx(r.Context(), revisionID, docID, reviewer.ID)
+	if err := r.ParseForm(); err != nil {
+		app.serverError(w, err)
+		return
+	}
+	note := r.PostForm.Get("note")
+
+	err := app.store.ApproveRevisionTx(r.Context(), revisionID, docID, reviewer.ID, note)
 	if err != nil {
 		app.serverError(w, err)
 		return
@@ -46,6 +54,38 @@ func (app *Application) approvalQueue(w http.ResponseWriter, r *http.Request) {
 	app.render(w, r, http.StatusOK, "approval-queue.page.tmpl", data)
 }
 
+func (app *Application) approvalReviewView(w http.ResponseWriter, r *http.Request) {
+	// Show a single submitted revision with full content and review forms
+	revID := app.readIDParam(r, "id")
+	if revID == 0 {
+		http.Error(w, "invalid revision id", http.StatusBadRequest)
+		return
+	}
+
+	revisions, err := app.store.ListSubmittedRevisions(r.Context())
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	var target *data.NotebookRevision
+	for _, r := range revisions {
+		if r.ID == revID {
+			rev := r
+			target = &rev
+			break
+		}
+	}
+	if target == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	td := app.newTemplateData(r)
+	td.CurrentRevision = target
+	app.render(w, r, http.StatusOK, "approval-review.page.tmpl", td)
+}
+
 func (app *Application) rejectRevisionSubmit(w http.ResponseWriter, r *http.Request) {
 	reviewer := contextGetUser(r.Context())
 	revisionID := app.readIDParam(r, "revID")
@@ -57,7 +97,13 @@ func (app *Application) rejectRevisionSubmit(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	err := app.store.RejectRevisionTx(r.Context(), revisionID, reviewer.ID)
+	if err := r.ParseForm(); err != nil {
+		app.serverError(w, err)
+		return
+	}
+	note := r.PostForm.Get("note")
+
+	err := app.store.RejectRevisionTx(r.Context(), revisionID, reviewer.ID, note)
 	if err != nil {
 		app.serverError(w, err)
 		return

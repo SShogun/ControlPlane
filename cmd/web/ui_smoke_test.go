@@ -65,8 +65,8 @@ func TestRealTemplatesRenderShowcaseSurfaces(t *testing.T) {
 			path:    "/dashboard",
 			user:    user,
 			contains: []string{
-				"Your Recent Drafts",
-				"Submit for Approval",
+				"Your Recent Revisions",
+				"Submit for Review",
 				"Database Failover Runbook",
 			},
 		},
@@ -80,7 +80,7 @@ func TestRealTemplatesRenderShowcaseSurfaces(t *testing.T) {
 			},
 			contains: []string{
 				"Database Failover Runbook",
-				"Submit for Approval",
+				"Submit for Review",
 				"Flag Notebook",
 				"database",
 			},
@@ -93,8 +93,7 @@ func TestRealTemplatesRenderShowcaseSurfaces(t *testing.T) {
 			contains: []string{
 				"Approval Queue",
 				"Submitted Runbook",
-				"Approve",
-				"Reject",
+				"View & Review",
 			},
 		},
 		{
@@ -117,6 +116,16 @@ func TestRealTemplatesRenderShowcaseSurfaces(t *testing.T) {
 				"System Audit Logs",
 				"revision_approved",
 				"notebook_revision",
+			},
+		},
+		{
+			name:    "admin teams",
+			handler: app.adminTeams,
+			path:    "/admin/teams",
+			user:    admin,
+			contains: []string{
+				"Team Onboarding",
+				"No teams configured yet.",
 			},
 		},
 	}

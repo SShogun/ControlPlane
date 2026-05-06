@@ -22,6 +22,7 @@ type fakeStore struct {
 	notebooks    map[int]data.Notebook
 	revisions    map[int][]data.NotebookRevision
 	tags         map[int][]data.Tag
+	nextUserID   int
 	submitted    []data.NotebookRevision
 	auditEvents  []data.AuditEvent
 	flags        []data.ModerationFlag
@@ -49,6 +50,7 @@ func newFakeStore() *fakeStore {
 		notebooks:    map[int]data.Notebook{},
 		revisions:    map[int][]data.NotebookRevision{},
 		tags:         map[int][]data.Tag{},
+		nextUserID:   1,
 	}
 }
 
@@ -75,6 +77,20 @@ func (s *fakeStore) GetUser(ctx context.Context, id int) (data.User, error) {
 
 func (s *fakeStore) CheckPassword(user data.User, password string) bool {
 	return user.ID != 0 && password == "test123"
+}
+
+func (s *fakeStore) CreateUser(ctx context.Context, params data.CreateUserParams) (int, error) {
+	for id, user := range s.usersByEmail {
+		_ = id
+		if user.Email == params.Email {
+			return user.ID, nil
+		}
+	}
+	userID := s.nextUserID
+	s.nextUserID++
+	user := data.User{ID: userID, Email: params.Email, PasswordHash: params.PasswordHash, Role: "member"}
+	s.addUser(user)
+	return userID, nil
 }
 
 func (s *fakeStore) ListNotebooks(ctx context.Context) ([]data.Notebook, error) {
@@ -143,6 +159,25 @@ func (s *fakeStore) AddMembership(ctx context.Context, userID, teamID int, role 
 	return nil
 }
 
+func (s *fakeStore) DeleteNotebook(ctx context.Context, notebookID int) error {
+	delete(s.notebooks, notebookID)
+	delete(s.revisions, notebookID)
+	return nil
+}
+
+func (s *fakeStore) DeleteNotebookRevision(ctx context.Context, revisionID int) error {
+	for notebookID, revisions := range s.revisions {
+		filtered := make([]data.NotebookRevision, 0, len(revisions))
+		for _, revision := range revisions {
+			if revision.ID != revisionID {
+				filtered = append(filtered, revision)
+			}
+		}
+		s.revisions[notebookID] = filtered
+	}
+	return nil
+}
+
 func (s *fakeStore) CreateNotebookRevision(ctx context.Context, params data.CreateNotebookRevisionParams) (int, error) {
 	s.createRevisionCalled = true
 	s.createRevisionParams = params
@@ -169,7 +204,7 @@ func (s *fakeStore) InsertAuditLog(ctx context.Context, params data.InsertAuditL
 	return nil
 }
 
-func (s *fakeStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) error {
+func (s *fakeStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int, note string) error {
 	s.approveCalled = true
 	s.approvedRevID = revisionID
 	s.approvedDocID = notebookID
@@ -177,7 +212,7 @@ func (s *fakeStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookI
 	return nil
 }
 
-func (s *fakeStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID int) error {
+func (s *fakeStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID int, note string) error {
 	s.rejectCalled = true
 	s.updateStatusCalled = true
 	s.updateStatusParams = data.UpdateRevisionStatusParams{

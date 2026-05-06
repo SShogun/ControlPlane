@@ -1,0 +1,25 @@
+# 1. Kill everything
+taskkill /F /IM go.exe 2>$null
+taskkill /F /IM web.exe 2>$null
+
+# 2. Stop Docker
+docker-compose -f docker-compose.test.yml down -v
+
+# 3. Clean Go cache
+go clean -cache
+go clean -testcache
+
+# 4. Remove Docker images (optional - complete wipe)
+docker rmi controlplane-db-test -f 2>$null
+
+# 5. Wait for port to clear
+Start-Sleep -Seconds 3
+
+# 6. Restart from scratch
+docker-compose -f docker-compose.test.yml up -d
+Start-Sleep -Seconds 10
+$env:DATABASE_URL="postgres://testuser:testpass@localhost:5433/controlplane_test?sslmode=disable"
+$env:CSRF_SECRET="12345678901234567890123456789012"
+$env:ENV="dev"
+go run ./cmd/seed
+go run ./cmd/web

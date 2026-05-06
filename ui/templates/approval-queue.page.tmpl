@@ -17,17 +17,7 @@
                 Notebook ID: <span class="mono">{{.NotebookID}}</span> | Author: #{{.AuthorID}}
             </p>
             <div style="display: flex; gap: 0.5rem; margin-top: 1.5rem;">
-                <form action="/approvals/approve" method="POST" style="flex: 1;">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <input type="hidden" name="revision_id" value="{{.ID}}">
-                    <input type="hidden" name="notebook_id" value="{{.NotebookID}}">
-                    <button type="submit" class="btn btn-primary" style="width: 100%;">Approve</button>
-                </form>
-                <form action="/approvals/reject" method="POST" style="flex: 1;">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <input type="hidden" name="revision_id" value="{{.ID}}">
-                    <button type="submit" class="btn btn-danger" style="width: 100%;">Reject</button>
-                </form>
+                <a href="/approvals/{{.ID}}" class="btn btn-outline" style="width:100%; text-align:center;">View & Review</a>
             </div>
         </div>
         {{end}}

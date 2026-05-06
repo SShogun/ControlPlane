@@ -42,15 +42,35 @@ func main() {
 
 	fmt.Println("Seeding database...")
 
-	// 1. Create Users
+	// 1. Create Teams
+	teamMap := make(map[string]int)
+	teams := []string{"Engineering", "Operations"}
+
+	for _, teamName := range teams {
+		var teamID int
+		err = pool.QueryRow(ctx, `
+			INSERT INTO teams (name) 
+			VALUES ($1) 
+			ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name 
+			RETURNING id`, teamName).Scan(&teamID)
+		if err != nil {
+			log.Fatalf("Failed to insert team %s: %v", teamName, err)
+		}
+		teamMap[teamName] = teamID
+	}
+	fmt.Println("✓ Teams created")
+
+	// 2. Create Users with Demo Credentials
 	users := []struct {
 		Email    string
 		Password string
 		Role     string
+		Team     string
 	}{
-		{"admin@controlplane.local", "admin123", "admin"},
-		{"reviewer@controlplane.local", "reviewer123", "reviewer"},
-		{"member@controlplane.local", "member123", "member"},
+		{"alice@example.com", "password123", "admin", "Engineering"},
+		{"bob@example.com", "password123", "reviewer", "Engineering"},
+		{"charlie@example.com", "password123", "member", "Engineering"},
+		{"diana@example.com", "password123", "member", "Operations"},
 	}
 
 	for _, u := range users {
@@ -69,18 +89,7 @@ func main() {
 			log.Fatalf("Failed to insert user %s: %v", u.Email, err)
 		}
 
-		// Also insert into memberships (assuming team_id 1 is the default team)
-		// For simplicity, we just insert the role into the memberships table
-		// We'll insert a default team first
-		var teamID int
-		err = pool.QueryRow(ctx, `
-			INSERT INTO teams (name) VALUES ('Engineering')
-			ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name
-			RETURNING id`).Scan(&teamID)
-		if err != nil {
-			log.Fatalf("Failed to insert team: %v", err)
-		}
-
+		teamID := teamMap[u.Team]
 		_, err = pool.Exec(ctx, `
 			INSERT INTO memberships (user_id, team_id, role) 
 			VALUES ($1, $2, $3)
@@ -88,6 +97,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to insert membership for %s: %v", u.Email, err)
 		}
+		fmt.Printf("✓ Created user: %s (role: %s, team: %s)\n", u.Email, u.Role, u.Team)
 	}
 
 	// 2. Create a Notebook

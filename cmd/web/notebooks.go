@@ -84,7 +84,8 @@ func (app *Application) notebookCreateSubmit(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	app.logAuditEvent(r, "draft_created", "notebook_revision", id)
+	// include title in audit details
+	app.logAuditEvent(r, "draft_created", "notebook", id, fmt.Sprintf(`{"title": %q}`, form.Title))
 	app.sessionManager.Put(r.Context(), "flash", "Draft Created")
 	http.Redirect(w, r, fmt.Sprintf("/notebooks/%d", id), http.StatusSeeOther)
 }
@@ -228,7 +229,7 @@ func (app *Application) notebookEditSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	app.logAuditEvent(r, "draft_updated", "notebook_revision", revisionID)
+	app.logAuditEvent(r, "draft_updated", "notebook_revision", revisionID, fmt.Sprintf(`{"title": %q}`, form.Title))
 	app.sessionManager.Put(r.Context(), "flash", "Draft updated")
 	http.Redirect(w, r, fmt.Sprintf("/notebooks/%d", notebookID), http.StatusSeeOther)
 }
@@ -262,7 +263,7 @@ func (app *Application) notebookFlagSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	app.logAuditEvent(r, "moderation_flag_created", "moderation_flag", flagID)
+	app.logAuditEvent(r, "moderation_flag_created", "moderation_flag", flagID, fmt.Sprintf(`{"reason": %q}`, reason))
 	app.sessionManager.Put(r.Context(), "flash", "Notebook flagged for moderation.")
 	http.Redirect(w, r, fmt.Sprintf("/notebooks/%d", notebookID), http.StatusSeeOther)
 }
@@ -292,6 +293,12 @@ func (app *Application) notebookSubmitForApproval(w http.ResponseWriter, r *http
 		return
 	}
 
+	// allow optional message when submitting for review
+	if err := r.ParseForm(); err == nil {
+		// reuse submission message if provided
+	}
+	msg := r.PostForm.Get("message")
+
 	err = app.store.UpdateRevisionStatus(r.Context(), data.UpdateRevisionStatusParams{
 		ID:     revision.ID,
 		Status: "submitted",
@@ -301,7 +308,7 @@ func (app *Application) notebookSubmitForApproval(w http.ResponseWriter, r *http
 		return
 	}
 
-	app.logAuditEvent(r, "revision_submitted", "notebook_revision", revision.ID)
+	app.logAuditEvent(r, "revision_submitted", "notebook_revision", revision.ID, fmt.Sprintf(`{"message": %q}`, msg))
 	app.sessionManager.Put(r.Context(), "flash", "Draft submitted for approval.")
 	http.Redirect(w, r, fmt.Sprintf("/notebooks/%d", notebookID), http.StatusSeeOther)
 }

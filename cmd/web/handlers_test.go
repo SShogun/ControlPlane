@@ -27,10 +27,11 @@ to simulate operations
 
 // mockStore is a fake implementation of data.UserStore for testing.
 type mockStore struct {
-	users     map[int]*data.User
-	notebooks map[int]*data.Notebook
-	revisions map[int][]data.NotebookRevision
-	tags      map[int][]data.Tag
+	users      map[int]*data.User
+	notebooks  map[int]*data.Notebook
+	revisions  map[int][]data.NotebookRevision
+	tags       map[int][]data.Tag
+	nextUserID int
 
 	createDraftCalled            bool
 	createNotebookRevisionCalled bool
@@ -45,10 +46,11 @@ type mockStore struct {
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		users:     make(map[int]*data.User),
-		notebooks: make(map[int]*data.Notebook),
-		revisions: make(map[int][]data.NotebookRevision),
-		tags:      make(map[int][]data.Tag),
+		users:      make(map[int]*data.User),
+		notebooks:  make(map[int]*data.Notebook),
+		revisions:  make(map[int][]data.NotebookRevision),
+		tags:       make(map[int][]data.Tag),
+		nextUserID: 1,
 	}
 }
 
@@ -72,6 +74,18 @@ func (m *mockStore) GetUser(ctx context.Context, id int) (data.User, error) {
 func (m *mockStore) CheckPassword(user data.User, password string) bool {
 
 	return password == "test123"
+}
+
+func (m *mockStore) CreateUser(ctx context.Context, params data.CreateUserParams) (int, error) {
+	for _, user := range m.users {
+		if user.Email == params.Email {
+			return user.ID, nil
+		}
+	}
+	userID := m.nextUserID
+	m.nextUserID++
+	m.users[userID] = &data.User{ID: userID, Email: params.Email, PasswordHash: params.PasswordHash, Role: "member"}
+	return userID, nil
 }
 
 func (m *mockStore) ListNotebooks(ctx context.Context) ([]data.Notebook, error) {
@@ -140,6 +154,25 @@ func (m *mockStore) AddMembership(ctx context.Context, userID, teamID int, role 
 	return nil
 }
 
+func (m *mockStore) DeleteNotebook(ctx context.Context, notebookID int) error {
+	delete(m.notebooks, notebookID)
+	delete(m.revisions, notebookID)
+	return nil
+}
+
+func (m *mockStore) DeleteNotebookRevision(ctx context.Context, revisionID int) error {
+	for notebookID, revisions := range m.revisions {
+		filtered := make([]data.NotebookRevision, 0, len(revisions))
+		for _, revision := range revisions {
+			if revision.ID != revisionID {
+				filtered = append(filtered, revision)
+			}
+		}
+		m.revisions[notebookID] = filtered
+	}
+	return nil
+}
+
 func (m *mockStore) CreateNotebookRevision(ctx context.Context, params data.CreateNotebookRevisionParams) (int, error) {
 	m.createNotebookRevisionCalled = true
 	m.lastCreateRevisionParams = params
@@ -172,7 +205,7 @@ func (m *mockStore) InsertAuditLog(ctx context.Context, params data.InsertAuditL
 	return nil
 }
 
-func (m *mockStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) error {
+func (m *mockStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int, note string) error {
 	m.approveRevisionTxCalled = true
 	m.lastApprovedRevisionID = revisionID
 	m.lastApprovedNotebookID = notebookID
@@ -180,7 +213,7 @@ func (m *mockStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookI
 	return nil
 }
 
-func (m *mockStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID int) error {
+func (m *mockStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID int, note string) error {
 	return m.UpdateRevisionStatus(ctx, data.UpdateRevisionStatusParams{ID: revisionID, Status: "rejected"})
 }
 

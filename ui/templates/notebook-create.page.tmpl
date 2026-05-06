@@ -1,0 +1,61 @@
+{{template "base" .}}
+
+{{define "title"}}Create Draft{{end}}
+
+{{define "main"}}
+<div style="max-width: 800px; margin: 0 auto;">
+    <h2 style="margin-bottom: 1.5rem;">Create New Draft</h2>
+
+    <div class="card">
+        <form action="/notebooks/new" method="POST" novalidate>
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+
+            <div class="form-group">
+                <label>Title</label>
+                <input type="text" name="title" value="{{.Form.Title}}" placeholder="Incident Response Runbook">
+                {{with .Errors.title}}
+                    <span class="error">{{.}}</span>
+                {{end}}
+            </div>
+
+            <div class="form-group">
+                <label>Slug (URL identifier)</label>
+                <input type="text" name="slug" value="{{.Form.Slug}}" placeholder="incident-response-runbook">
+                {{with .Errors.slug}}
+                    <span class="error">{{.}}</span>
+                {{end}}
+            </div>
+
+            <div class="form-group">
+                <label>Visibility</label>
+                <select name="visibility">
+                    <option value="public" {{if eq .Form.Visibility "public"}}selected{{end}}>Public (Internal to all teams)</option>
+                    <option value="team" {{if eq .Form.Visibility "team"}}selected{{end}}>Team Only</option>
+                    <option value="private" {{if eq .Form.Visibility "private"}}selected{{end}}>Private</option>
+                </select>
+                {{with .Errors.visibility}}
+                    <span class="error">{{.}}</span>
+                {{end}}
+            </div>
+
+            <div class="form-group">
+                <label>Tags</label>
+                <input type="text" name="tags" value="{{.Form.Tags}}" placeholder="incident, database, on-call">
+            </div>
+
+            <div class="form-group">
+                <label>Content (Markdown)</label>
+                <textarea name="body" rows="12" placeholder="# Introduction\n\nSteps to follow...">{{.Form.Body}}</textarea>
+                {{with .Errors.body}}
+                    <span class="error">{{.}}</span>
+                {{end}}
+            </div>
+
+            <div style="display: flex; gap: 1rem; margin-top: 2rem;">
+                <button type="submit" class="btn btn-primary">Save Draft</button>
+                <a href="/notebooks" class="btn btn-outline">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{{end}}

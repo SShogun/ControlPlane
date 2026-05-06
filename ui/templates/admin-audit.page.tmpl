@@ -1,0 +1,42 @@
+{{template "base" .}}
+
+{{define "title"}}Audit Logs{{end}}
+
+{{define "main"}}
+<div style="margin-bottom: 2rem;">
+    <h2>System Audit Logs</h2>
+    <p style="color: var(--text-secondary);">Immutable record of critical governance actions.</p>
+</div>
+
+<div class="card" style="padding: 0; overflow: hidden;">
+    <table>
+        <thead style="background: rgba(15, 23, 42, 0.6);">
+            <tr>
+                <th>Action</th>
+                <th>Entity Type</th>
+                <th>Entity ID</th>
+                <th>Actor ID</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{if .AuditEvents}}
+            {{range .AuditEvents}}
+            <tr>
+                <td>{{.EventType}}</td>
+                <td>{{.EntityType}}</td>
+                <td>{{.EntityID}}</td>
+                <td>{{.ActorID}}</td>
+            </tr>
+            {{end}}
+            {{else}}
+            <tr>
+                <td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 2rem;">
+                    No audit events recorded yet.
+                </td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+
+{{end}}

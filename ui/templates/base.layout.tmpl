@@ -1,0 +1,48 @@
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{template "title" .}} - ControlPlane</title>
+    <link rel="stylesheet" href="/static/css/index.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="/" class="brand">Control<span>Plane</span></a>
+            <ul>
+                {{if .IsAuthenticated}}
+                    <li><a href="/dashboard">Dashboard</a></li>
+                    <li><a href="/notebooks">Notebooks</a></li>
+                    <li><a href="/notebooks/search">Search</a></li>
+                    {{if eq .User.Role "reviewer" "admin"}}
+                    <li><a href="/approvals">Approvals</a></li>
+                    <li><a href="/moderation">Moderation</a></li>
+                    {{end}}
+                    <li>
+                        <form action="/logout" method="POST" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                            <button type="submit" class="btn btn-outline" style="padding: 0.4rem 1rem; font-size: 0.875rem;">Logout ({{.User.Email}})</button>
+                        </form>
+                    </li>
+                {{else}}
+                    <li><a href="/login" class="btn btn-primary">Login</a></li>
+                {{end}}
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        {{with .Flash}}
+            <div class="flash-container">
+                <div class="flash flash-success">{{.}}</div>
+            </div>
+        {{end}}
+
+        {{template "main" .}}
+    </main>
+
+</body>
+</html>
+{{end}}

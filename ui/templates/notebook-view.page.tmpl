@@ -1,0 +1,50 @@
+{{template "base" .}}
+
+{{define "title"}}Notebook{{end}}
+
+{{define "main"}}
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem;">
+    <div>
+        <h2 style="font-size: 2.5rem; margin-bottom: 0.5rem; letter-spacing: -0.5px;">{{.CurrentRevision.Title}}</h2>
+        <div style="display: flex; gap: 1rem; align-items: center; color: var(--text-secondary); font-size: 0.875rem;">
+            <span>By User #{{.CurrentRevision.AuthorID}}</span>
+            <span>Status: <span class="badge badge-blue">{{.CurrentRevision.Status}}</span></span>
+        </div>
+    </div>
+    <div style="display: flex; gap: 1rem;">
+        {{if eq .CurrentRevision.Status "draft"}}
+        <a href="/notebooks/{{.CurrentRevision.NotebookID}}/edit" class="btn btn-outline">Edit Draft</a>
+        <form action="/notebooks/{{.CurrentRevision.NotebookID}}/submit" method="POST">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <button type="submit" class="btn btn-primary">Submit for Approval</button>
+        </form>
+        {{else if eq .CurrentRevision.Status "submitted"}}
+        <a href="/approvals" class="btn btn-outline">Awaiting Review</a>
+        {{end}}
+    </div>
+</div>
+
+{{if .Tags}}
+<div style="margin-bottom: 2rem; display: flex; gap: 0.5rem;">
+    {{range .Tags}}
+        <span class="badge badge-green">{{.Name}}</span>
+    {{end}}
+</div>
+{{end}}
+
+<div class="card" style="padding: 3rem;">
+    <div style="white-space: pre-wrap; font-family: var(--font-sans); line-height: 1.8;">{{.CurrentRevision.Body}}</div>
+</div>
+
+<div class="card" style="margin-top: 2rem;">
+    <h3 style="margin-bottom: 1rem;">Moderation</h3>
+    <form action="/notebooks/{{.CurrentRevision.NotebookID}}/flag" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <div class="form-group">
+            <label>Reason</label>
+            <input type="text" name="reason" placeholder="Outdated step, unsafe command, missing owner">
+        </div>
+        <button type="submit" class="btn btn-outline">Flag Notebook</button>
+    </form>
+</div>
+{{end}}

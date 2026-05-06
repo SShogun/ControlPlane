@@ -1,0 +1,41 @@
+{{template "base" .}}
+
+{{define "title"}}Approval Queue{{end}}
+
+{{define "main"}}
+<div style="margin-bottom: 2rem;">
+    <h2>Approval Queue</h2>
+    <p style="color: var(--text-secondary);">Revisions awaiting reviewer approval.</p>
+</div>
+
+{{if .Revisions}}
+    <div class="grid">
+        {{range .Revisions}}
+        <div class="card">
+            <h3>{{.Title}}</h3>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
+                Notebook ID: <span class="mono">{{.NotebookID}}</span> | Author: #{{.AuthorID}}
+            </p>
+            <div style="display: flex; gap: 0.5rem; margin-top: 1.5rem;">
+                <form action="/approvals/approve" method="POST" style="flex: 1;">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <input type="hidden" name="revision_id" value="{{.ID}}">
+                    <input type="hidden" name="notebook_id" value="{{.NotebookID}}">
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Approve</button>
+                </form>
+                <form action="/approvals/reject" method="POST" style="flex: 1;">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <input type="hidden" name="revision_id" value="{{.ID}}">
+                    <button type="submit" class="btn btn-danger" style="width: 100%;">Reject</button>
+                </form>
+            </div>
+        </div>
+        {{end}}
+    </div>
+{{else}}
+    <div class="card" style="text-align: center; padding: 3rem;">
+        <p style="color: var(--text-secondary);">No revisions in the queue.</p>
+    </div>
+{{end}}
+
+{{end}}

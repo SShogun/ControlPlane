@@ -1,0 +1,38 @@
+{{template "base" .}}
+
+{{define "title"}}Notebooks{{end}}
+
+{{define "main"}}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+    <h2>Notebooks</h2>
+    <a href="/notebooks/new" class="btn btn-primary">+ Create Notebook</a>
+</div>
+
+{{if .Notebooks}}
+    <div class="grid">
+        {{range .Notebooks}}
+        <div class="card">
+            <h3><a href="/notebooks/{{.ID}}" style="color: var(--text-primary); text-decoration: none;">{{.Title}}</a></h3>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
+                Slug: <span class="mono">{{.Slug}}</span>
+            </p>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.25rem;">
+                Visibility: <span class="badge badge-green">{{.Visibility}}</span>
+            </p>
+            <p style="margin-top: 0.75rem;">
+                {{if .IsPublished}}
+                    <span class="badge badge-green">published</span>
+                {{else}}
+                    <span class="badge badge-yellow">draft</span>
+                {{end}}
+            </p>
+        </div>
+        {{end}}
+    </div>
+{{else}}
+    <div class="card" style="text-align: center; padding: 3rem;">
+        <p style="color: var(--text-secondary);">No notebooks found.</p>
+    </div>
+{{end}}
+
+{{end}}

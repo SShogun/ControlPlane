@@ -1,0 +1,37 @@
+{{template "base" .}}
+
+{{define "title"}}Login{{end}}
+
+{{define "main"}}
+<div style="max-width: 400px; margin: 4rem auto;">
+    <div class="card">
+        <h2 style="margin-bottom: 1.5rem; text-align: center;">Sign In</h2>
+
+        {{with .Errors.generic}}
+            <div class="error" style="margin-bottom: 1rem; text-align: center; font-weight: 500;">{{.}}</div>
+        {{end}}
+
+        <form action="/login" method="POST" novalidate>
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" name="email" value="{{.Form.Email}}" placeholder="member@example.com">
+                {{with .Errors.email}}
+                    <span class="error">{{.}}</span>
+                {{end}}
+            </div>
+
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" placeholder="••••••••">
+                {{with .Errors.password}}
+                    <span class="error">{{.}}</span>
+                {{end}}
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Authenticate</button>
+        </form>
+    </div>
+</div>
+{{end}}

@@ -1,0 +1,33 @@
+{{template "base" .}}
+
+{{define "title"}}Home{{end}}
+
+{{define "main"}}
+<div style="text-align: center; padding: 4rem 0;">
+    <h1 style="font-size: 3rem; margin-bottom: 1rem; color: var(--text-primary); letter-spacing: -1px;">Operational Knowledge System</h1>
+    <p style="font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 2rem;">
+        Internal runbooks, incident documentation, and governance-driven operational knowledge sharing.
+    </p>
+
+    {{if .IsAuthenticated}}
+        <a href="/dashboard" class="btn btn-primary" style="font-size: 1.125rem; padding: 1rem 2rem;">Go to Dashboard</a>
+    {{else}}
+        <a href="/login" class="btn btn-primary" style="font-size: 1.125rem; padding: 1rem 2rem;">Sign In</a>
+    {{end}}
+</div>
+
+<div class="grid" style="margin-top: 4rem;">
+    <div class="card">
+        <h3 style="margin-bottom: 0.5rem;">📝 Versioned Notebooks</h3>
+        <p style="color: var(--text-secondary);">Drafts and published revisions are split for safe editing. Nothing overwrites production blindly.</p>
+    </div>
+    <div class="card">
+        <h3 style="margin-bottom: 0.5rem;">✅ Approval Workflows</h3>
+        <p style="color: var(--text-secondary);">Revisions are submitted to a queue and approved by Reviewers before going live.</p>
+    </div>
+    <div class="card">
+        <h3 style="margin-bottom: 0.5rem;">🔒 Audit & Governance</h3>
+        <p style="color: var(--text-secondary);">All critical operations are logged transactionally in an append-only audit trail.</p>
+    </div>
+</div>
+{{end}}

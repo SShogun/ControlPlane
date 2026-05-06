@@ -1,0 +1,40 @@
+{{template "base" .}}
+
+{{define "title"}}Moderation{{end}}
+
+{{define "main"}}
+<div style="margin-bottom: 2rem;">
+    <h2>Moderation Queue</h2>
+    <p style="color: var(--text-secondary);">Notebook flags raised by users and reviewers.</p>
+</div>
+
+{{if .ModerationFlags}}
+    <div class="grid">
+        {{range .ModerationFlags}}
+        <div class="card">
+            <h3>Notebook #{{.NotebookID}}</h3>
+            <p style="color: var(--text-secondary); margin-top: 0.75rem;">{{.Reason}}</p>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.75rem;">
+                Flagged by user #{{.ModeratorID}}
+            </p>
+            <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem; flex-wrap: wrap;">
+                <a href="/notebooks/{{.NotebookID}}" class="btn btn-outline">Open Notebook</a>
+                {{if .ResolvedAt}}
+                    <span class="badge badge-green" style="align-self: center;">resolved</span>
+                {{else}}
+                    <form action="/moderation/resolve" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                        <input type="hidden" name="flag_id" value="{{.ID}}">
+                        <button type="submit" class="btn btn-primary">Resolve</button>
+                    </form>
+                {{end}}
+            </div>
+        </div>
+        {{end}}
+    </div>
+{{else}}
+    <div class="card" style="text-align: center; padding: 3rem;">
+        <p style="color: var(--text-secondary);">No moderation flags.</p>
+    </div>
+{{end}}
+{{end}}

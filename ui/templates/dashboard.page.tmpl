@@ -1,0 +1,71 @@
+{{template "base" .}}
+
+{{define "title"}}Dashboard{{end}}
+
+{{define "main"}}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+    <h2>Dashboard</h2>
+    <a href="/notebooks/new" class="btn btn-primary">+ New Draft</a>
+</div>
+
+<div class="grid">
+    <div class="card">
+        <h3>Welcome, {{.User.Email}}</h3>
+        <p style="color: var(--text-secondary); margin-top: 0.5rem;">
+            Role: <span class="badge badge-blue">{{.User.Role}}</span>
+        </p>
+    </div>
+
+    {{if eq .User.Role "reviewer" "admin"}}
+    <div class="card">
+        <h3>Reviewer Actions</h3>
+        <p style="color: var(--text-secondary); margin-top: 0.5rem; margin-bottom: 1rem;">
+            You have access to approval and moderation queues.
+        </p>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <a href="/approvals" class="btn btn-outline">Approval Queue</a>
+            <a href="/moderation" class="btn btn-outline">Moderation Queue</a>
+        </div>
+    </div>
+    {{end}}
+
+    {{if eq .User.Role "admin"}}
+    <div class="card">
+        <h3>Admin Tools</h3>
+        <p style="color: var(--text-secondary); margin-top: 0.5rem; margin-bottom: 1rem;">
+            View system audit logs.
+        </p>
+        <a href="/admin/audit" class="btn btn-outline">View Audit Logs</a>
+    </div>
+    {{end}}
+</div>
+
+<h3 style="margin-top: 3rem; margin-bottom: 1rem;">Your Recent Drafts</h3>
+{{if .Revisions}}
+    <div class="grid">
+        {{range .Revisions}}
+        <div class="card">
+            <h3><a href="/notebooks/{{.NotebookID}}" style="color: var(--text-primary); text-decoration: none;">{{.Title}}</a></h3>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
+                Notebook ID: <span class="mono">{{.NotebookID}}</span>
+            </p>
+            <p style="margin-top: 0.75rem;">
+                <span class="badge badge-blue">{{.Status}}</span>
+            </p>
+            <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem;">
+                <a href="/notebooks/{{.NotebookID}}/edit" class="btn btn-outline">Edit</a>
+                <form action="/notebooks/{{.NotebookID}}/submit" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" class="btn btn-primary">Submit for Approval</button>
+                </form>
+            </div>
+        </div>
+        {{end}}
+    </div>
+{{else}}
+    <div class="card" style="padding: 2rem;">
+        <p style="color: var(--text-secondary);">No draft revisions yet.</p>
+    </div>
+{{end}}
+
+{{end}}

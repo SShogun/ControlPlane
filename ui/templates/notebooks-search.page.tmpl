@@ -1,0 +1,36 @@
+{{template "base" .}}
+
+{{define "title"}}Search Notebooks{{end}}
+
+{{define "main"}}
+<div style="margin-bottom: 2rem;">
+    <h2>Search Knowledge Base</h2>
+</div>
+
+<div class="card" style="margin-bottom: 2rem;">
+    <form action="/notebooks/search" method="GET" style="display: flex; gap: 1rem;">
+        <input type="text" name="q" placeholder="Search by title..." style="flex: 1;" value="{{.Form.Query}}">
+        <button type="submit" class="btn btn-primary">Search</button>
+    </form>
+</div>
+
+{{if .Notebooks}}
+    <div class="grid">
+        {{range .Notebooks}}
+        <div class="card">
+            <h3><a href="/notebooks/{{.ID}}" style="color: var(--text-primary); text-decoration: none;">{{.Title}}</a></h3>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
+                Slug: <span class="mono">{{.Slug}}</span>
+            </p>
+        </div>
+        {{end}}
+    </div>
+{{else}}
+    {{if .Form.Query}}
+    <div class="card" style="text-align: center; padding: 3rem;">
+        <p style="color: var(--text-secondary);">No notebooks found matching your search.</p>
+    </div>
+    {{end}}
+{{end}}
+
+{{end}}

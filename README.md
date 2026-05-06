@@ -94,6 +94,7 @@ Phase 5 test files, integration tests, rate limiting, and CI pipelines are now c
 | Phase 3 | Notebooks, revisions, tags, search, DB-backed pages | ✅ Complete |
 | Phase 4 | Approvals, audit, moderation, governance | ✅ Complete |
 | Phase 5 | Tests, CI, production hardening | ✅ Complete |
+| Phase 6 | Advanced: Metrics, Tracing, Docker/K8s, Shared Rate Limiting | 🚧 Planned |
 
 ---
 
@@ -217,7 +218,7 @@ ControlPlane/
 │   ├── Phase 2-5 Wiring Recipe.md
 │   └── how_to_phase_5.md
 ├── .github/workflows/
-│   └── ci.yml                     # GitHub Actions CI pipeline
+│   └── go.yml                     # GitHub Actions CI pipeline
 ├── sqlc.yaml                      # sqlc configuration
 ├── go.mod
 ├── go.sum
@@ -409,12 +410,14 @@ Without this split, drafts and approvals become fragile because you keep overwri
 |--------|------|---------|-------------|
 | `GET` | `/dashboard` | `dashboard` | User dashboard |
 | `POST` | `/logout` | `logout` | Destroy session |
-| `GET` | `/notebooks` | `listNotebooks` | List published notebooks |
+| `GET` | `/notebooks` | `listNotebooks` | List notebooks and draft/published status |
 | `GET` | `/notebooks/new` | `notebookCreateForm` | Create draft form |
 | `POST` | `/notebooks/new` | `notebookCreateSubmit` | Submit new draft |
 | `GET` | `/notebooks/{id}` | `notebookView` | View notebook with revision & tags |
 | `GET` | `/notebooks/{id}/edit` | `notebookEditForm` | Edit draft form |
 | `POST` | `/notebooks/{id}/edit` | `notebookEditSubmit` | Submit draft edit |
+| `POST` | `/notebooks/{id}/submit` | `notebookSubmitForApproval` | Submit latest draft revision for review |
+| `POST` | `/notebooks/{id}/flag` | `notebookFlagSubmit` | Create a moderation flag |
 | `GET` | `/notebooks/search` | `notebooksSearch` | Search notebooks |
 
 ### Reviewer Routes (role: `reviewer`)
@@ -424,6 +427,8 @@ Without this split, drafts and approvals become fragile because you keep overwri
 | `GET` | `/approvals` | `approvalQueue` | Submitted revisions queue |
 | `POST` | `/approvals/approve` | `approveRevisionSubmit` | Approve and publish revision |
 | `POST` | `/approvals/reject` | `rejectRevisionSubmit` | Reject revision |
+| `GET` | `/moderation` | `moderationQueue` | Moderation flag queue |
+| `POST` | `/moderation/resolve` | `resolveModerationFlagSubmit` | Resolve a moderation flag |
 
 ### Admin Routes (role: `admin`)
 
@@ -511,12 +516,12 @@ jobs:
 
 ### Environment Variables
 
-Create a `.env` file at the project root:
+The app has development defaults that match `docker-compose.test.yml`. You can override them in your shell:
 
 ```env
-ENVIRONMENT=development
-DATABASE_URL=postgres://user:password@localhost:5432/controlplane
-SESSION_SECRET=change-me
+ENV=dev
+DATABASE_URL=postgres://testuser:testpass@localhost:5433/controlplane_test?sslmode=disable
+CSRF_SECRET=12345678901234567890123456789012
 ```
 
 ### Setup
@@ -526,12 +531,14 @@ SESSION_SECRET=change-me
 git clone https://github.com/SShogun/ControlPlane.git
 cd ControlPlane
 
-# Apply migrations
-psql -d controlplane -f migrations/0001_initial_schema.sql
-psql -d controlplane -f migrations/0002_create_audit_logs.sql
+# Start the local PostgreSQL database
+docker compose -f docker-compose.test.yml up -d
 
-# Generate sqlc code (if modifying queries)
-sqlc generate
+# Apply migrations and seed demo users/data
+go run ./cmd/seed
+
+# Optional if modifying SQL query files
+# sqlc generate
 
 # Run the application
 go run ./cmd/web
@@ -570,6 +577,10 @@ gantt
     section Phase 5
     Tests & CI                         :done, p5, after p4, 14d
     Production hardening               :done, p5b, after p5, 14d
+
+    section Phase 6 (Advanced)
+    Metrics & Tracing                  :        p6a, after p5b, 14d
+    K8s & Shared Limiting              :        p6b, after p6a, 14d
 ```
 
 ### Phase 0 — Foundation ✅
@@ -626,6 +637,14 @@ gantt
 - [x] Structured error handling improvements
 - [x] Request logging and observability
 - [x] Graceful shutdown
+
+### Phase 6 — Advanced Production Ops 🚧 (Future)
+
+- [ ] Prometheus metrics (`/metrics`) exposing request volume, latency, and domain events.
+- [ ] OpenTelemetry distributed tracing across HTTP handlers and DB operations.
+- [ ] Production `Dockerfile` with `/healthz` and `/readyz` endpoints.
+- [ ] Kubernetes manifests (Deployment, Service, ConfigMap, probes).
+- [ ] Redis-backed distributed rate limiting for replicas.
 
 ---
 

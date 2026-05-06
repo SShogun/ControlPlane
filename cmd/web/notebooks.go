@@ -182,6 +182,22 @@ func (app *Application) notebookEditSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Check if the latest revision is a draft
+	revisions, err := app.store.ListNotebookRevisions(r.Context(), notebookID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	if len(revisions) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	if revisions[0].Status != "draft" {
+		app.sessionManager.Put(r.Context(), "flash", "You can only edit draft revisions")
+		http.Redirect(w, r, fmt.Sprintf("/notebooks/%d", notebookID), http.StatusSeeOther)
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -293,9 +309,9 @@ func (app *Application) notebookSubmitForApproval(w http.ResponseWriter, r *http
 		return
 	}
 
-	// allow optional message when submitting for review
-	if err := r.ParseForm(); err == nil {
-		// reuse submission message if provided
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
 	}
 	msg := r.PostForm.Get("message")
 

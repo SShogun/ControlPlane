@@ -41,8 +41,9 @@ func (app *Application) requireRole(role string) func(http.Handler) http.Handler
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user := contextGetUser(r.Context())
+			allowed := user != nil && (user.Role == role || (role == "reviewer" && user.Role == "admin"))
 
-			if user == nil || (user.Role != role && !(role == "reviewer" && user.Role == "admin")) {
+			if !allowed {
 				app.sessionManager.Put(r.Context(), "flash", "You do not have permission to do that.")
 				http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 				return

@@ -25,11 +25,13 @@
         </form>
         {{else if eq .CurrentRevision.Status "submitted"}}
         <a href="/approvals" class="btn btn-outline">Awaiting Review</a>
-        {{else if and (eq .CurrentRevision.Status "approved") (eq .User.Role "admin")}}
+        {{else if eq .CurrentRevision.Status "approved"}}
+        {{if eq .User.Role "admin"}}
         <form action="/admin/notebooks/{{.CurrentRevision.NotebookID}}/delete" method="POST" class="stacked-form" style="min-width:180px;">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
             <button type="submit" class="btn btn-danger">Delete Notebook</button>
         </form>
+        {{end}}
         {{end}}
     </div>
 </div>

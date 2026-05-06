@@ -389,7 +389,12 @@ func (s *PgxStore) ListRecentDrafts(ctx context.Context, authorID int) ([]Notebo
 		       COALESCE(a.note, '') AS review_note, nr.created_at, nr.updated_at
 		FROM notebook_revisions nr
 		LEFT JOIN approvals a ON a.notebook_revision_id = nr.id
-		WHERE nr.author_id = $1
+		WHERE nr.author_id = $1 AND nr.id = (
+			SELECT id FROM notebook_revisions nr2
+			WHERE nr2.notebook_id = nr.notebook_id
+			ORDER BY nr2.updated_at DESC
+			LIMIT 1
+		)
 		ORDER BY nr.updated_at DESC
 		LIMIT 6
 	`

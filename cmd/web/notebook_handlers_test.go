@@ -1,4 +1,4 @@
-package web
+package main
 
 import (
 	"html/template"
@@ -40,8 +40,10 @@ func TestNotebookCreateSubmitCreatesDraftAndRevision(t *testing.T) {
 	user := &data.User{ID: 7, Email: "author@example.com"}
 
 	form := url.Values{
-		"title": {"My first notebook"},
-		"body":  {"Hello from tests"},
+		"title":      {"My first notebook"},
+		"slug":       {"my-first-notebook"},
+		"visibility": {"private"},
+		"body":       {"Hello from tests"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/notebooks/new", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -63,6 +65,12 @@ func TestNotebookCreateSubmitCreatesDraftAndRevision(t *testing.T) {
 	}
 	if store.createDraftParams.AuthorID != user.ID {
 		t.Fatalf("expected draft author %d; got %d", user.ID, store.createDraftParams.AuthorID)
+	}
+	if store.createDraftParams.Slug != "my-first-notebook" {
+		t.Fatalf("expected draft slug %q; got %q", "my-first-notebook", store.createDraftParams.Slug)
+	}
+	if store.createDraftParams.Visibility != "private" {
+		t.Fatalf("expected draft visibility %q; got %q", "private", store.createDraftParams.Visibility)
 	}
 	if store.createRevisionParams.AuthorID != user.ID {
 		t.Fatalf("expected revision author %d; got %d", user.ID, store.createRevisionParams.AuthorID)
@@ -121,8 +129,10 @@ func TestNotebookCreateSubmitRejectsTitleTooLong(t *testing.T) {
 
 	longTitle := strings.Repeat("a", 201)
 	form := url.Values{
-		"title": {longTitle},
-		"body":  {"valid body"},
+		"title":      {longTitle},
+		"slug":       {"valid-slug"},
+		"visibility": {"private"},
+		"body":       {"valid body"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/notebooks/new", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -147,8 +157,10 @@ func TestNotebookCreateSubmitRejectsBodyTooLong(t *testing.T) {
 
 	longBody := strings.Repeat("x", 50001)
 	form := url.Values{
-		"title": {"Valid Title"},
-		"body":  {longBody},
+		"title":      {"Valid Title"},
+		"slug":       {"valid-title"},
+		"visibility": {"private"},
+		"body":       {longBody},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/notebooks/new", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

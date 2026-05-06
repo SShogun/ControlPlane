@@ -1,4 +1,4 @@
-package web
+package main
 
 import (
 	"net/http"
@@ -42,7 +42,7 @@ func (app *Application) requireRole(role string) func(http.Handler) http.Handler
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user := contextGetUser(r.Context())
 
-			if user == nil || user.Role != role {
+			if user == nil || (user.Role != role && !(role == "reviewer" && user.Role == "admin")) {
 				app.sessionManager.Put(r.Context(), "flash", "You do not have permission to do that.")
 				http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 				return

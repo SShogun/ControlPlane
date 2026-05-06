@@ -1,4 +1,4 @@
-package web
+package main
 
 import (
 	"net/http"
@@ -37,9 +37,14 @@ func (app *Application) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
+type userLoginForm struct {
+	Email string
+}
+
 func (app *Application) loginForm(w http.ResponseWriter, r *http.Request) {
 	data := app.newTemplateData(r)
-	app.render(w, r, http.StatusOK, "login.tmpl", data)
+	data.Form = userLoginForm{}
+	app.render(w, r, http.StatusOK, "login.page.tmpl", data)
 }
 
 func (app *Application) logout(w http.ResponseWriter, r *http.Request) {

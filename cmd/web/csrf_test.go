@@ -1,4 +1,4 @@
-package web
+package main
 
 import (
 	"html"
@@ -21,7 +21,7 @@ func newCSRFTestApp(store *fakeStore) (*Application, http.Handler) {
 
 	templates := map[string]*template.Template{
 		"home.page.tmpl":             parseTemplate("home.page.tmpl", "home"),
-		"login.tmpl":                 parseTemplate("login.tmpl", `<form>{{.CSRFToken}}</form>`),
+		"login.page.tmpl":            parseTemplate("login.page.tmpl", `<form>{{.CSRFToken}}</form>`),
 		"dashboard.page.tmpl":        parseTemplate("dashboard.page.tmpl", "dashboard"),
 		"notebook-create.page.tmpl":  parseTemplate("notebook-create.page.tmpl", "create"),
 		"notebooks.page.tmpl":        parseTemplate("notebooks.page.tmpl", "list"),

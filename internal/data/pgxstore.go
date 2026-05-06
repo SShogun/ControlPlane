@@ -123,8 +123,8 @@ func (s *PgxStore) CreateTag(ctx context.Context, name string) (int, error) {
 
 func (s *PgxStore) AttachTag(ctx context.Context, notebookID, tagID int) error {
 	query := `
-        INSERT INTO document_tags (document_id, tag_id) VALUES ($1, $2) 
-        ON CONFLICT (document_id, tag_id) DO NOTHING`
+        INSERT INTO notebook_tags (notebook_id, tag_id) VALUES ($1, $2) 
+        ON CONFLICT (notebook_id, tag_id) DO NOTHING`
 
 	_, err := s.DB.Exec(ctx, query, notebookID, tagID)
 	return err
@@ -134,8 +134,8 @@ func (s *PgxStore) ListNotebookTags(ctx context.Context, notebookID int) ([]Tag,
 	query := `
         SELECT t.id, t.name 
         FROM tags t 
-        JOIN document_tags dt ON t.id = dt.tag_id 
-        WHERE dt.document_id = $1 
+        JOIN notebook_tags nt ON t.id = nt.tag_id 
+        WHERE nt.notebook_id = $1 
         ORDER BY t.name ASC`
 
 	rows, err := s.DB.Query(ctx, query, notebookID)
@@ -161,12 +161,36 @@ func (s *PgxStore) ListNotebookTags(ctx context.Context, notebookID int) ([]Tag,
 }
 
 func (s *PgxStore) GetUserByEmail(ctx context.Context, email string) (User, error) {
-	const query = `SELECT id, email, password_hash FROM users WHERE email = $1`
+	const query = `
+		SELECT u.id, u.email, u.password_hash, COALESCE(m.role, 'member')
+		FROM users u
+		LEFT JOIN memberships m ON m.user_id = u.id
+		WHERE u.email = $1
+		ORDER BY
+			CASE m.role
+				WHEN 'admin' THEN 1
+				WHEN 'reviewer' THEN 2
+				ELSE 3
+			END
+		LIMIT 1
+	`
 	return scanUser(s.DB.QueryRow(ctx, query, email))
 }
 
 func (s *PgxStore) GetUser(ctx context.Context, id int) (User, error) {
-	const query = `SELECT id, email, password_hash FROM users WHERE id = $1`
+	const query = `
+		SELECT u.id, u.email, u.password_hash, COALESCE(m.role, 'member')
+		FROM users u
+		LEFT JOIN memberships m ON m.user_id = u.id
+		WHERE u.id = $1
+		ORDER BY
+			CASE m.role
+				WHEN 'admin' THEN 1
+				WHEN 'reviewer' THEN 2
+				ELSE 3
+			END
+		LIMIT 1
+	`
 	return scanUser(s.DB.QueryRow(ctx, query, id))
 }
 
@@ -176,9 +200,8 @@ func (s *PgxStore) CheckPassword(user User, password string) bool {
 
 func (s *PgxStore) ListNotebooks(ctx context.Context) ([]Notebook, error) {
 	const query = `
-		SELECT id, title, content, is_published, created_at, updated_at
+		SELECT id, title, content, slug, visibility, is_published, created_at, updated_at
 		FROM notebooks
-		WHERE is_published = 1
 		ORDER BY created_at DESC
 	`
 
@@ -191,8 +214,15 @@ func (s *PgxStore) ListNotebooks(ctx context.Context) ([]Notebook, error) {
 	notebooks := []Notebook{}
 	for rows.Next() {
 		var notebook Notebook
-		if err := rows.Scan(&notebook.ID, &notebook.Title, &notebook.Content, &notebook.IsPublished, &notebook.CreatedAt, &notebook.UpdatedAt); err != nil {
+		var slug, visibility *string
+		if err := rows.Scan(&notebook.ID, &notebook.Title, &notebook.Content, &slug, &visibility, &notebook.IsPublished, &notebook.CreatedAt, &notebook.UpdatedAt); err != nil {
 			return nil, err
+		}
+		if slug != nil {
+			notebook.Slug = *slug
+		}
+		if visibility != nil {
+			notebook.Visibility = *visibility
 		}
 		notebooks = append(notebooks, notebook)
 	}
@@ -204,20 +234,69 @@ func (s *PgxStore) ListNotebooks(ctx context.Context) ([]Notebook, error) {
 	return notebooks, nil
 }
 
+func (s *PgxStore) SearchNotebooks(ctx context.Context, queryText string) ([]Notebook, error) {
+	const query = `
+		SELECT id, title, content, slug, visibility, is_published, created_at, updated_at
+		FROM notebooks
+		WHERE title ILIKE '%' || $1 || '%'
+		   OR content ILIKE '%' || $1 || '%'
+		   OR slug ILIKE '%' || $1 || '%'
+		   OR EXISTS (
+				SELECT 1
+				FROM notebook_tags nt
+				JOIN tags t ON t.id = nt.tag_id
+				WHERE nt.notebook_id = notebooks.id
+				  AND t.name ILIKE '%' || $1 || '%'
+		   )
+		ORDER BY created_at DESC
+	`
+
+	rows, err := s.DB.Query(ctx, query, queryText)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	notebooks := []Notebook{}
+	for rows.Next() {
+		var notebook Notebook
+		var slug, visibility *string
+		if err := rows.Scan(&notebook.ID, &notebook.Title, &notebook.Content, &slug, &visibility, &notebook.IsPublished, &notebook.CreatedAt, &notebook.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if slug != nil {
+			notebook.Slug = *slug
+		}
+		if visibility != nil {
+			notebook.Visibility = *visibility
+		}
+		notebooks = append(notebooks, notebook)
+	}
+
+	return notebooks, rows.Err()
+}
+
 func (s *PgxStore) NotebookView(ctx context.Context, id int) ([]Notebook, error) {
 	const query = `
-		SELECT id, title, content, is_published, created_at, updated_at
+		SELECT id, title, content, slug, visibility, is_published, created_at, updated_at
 		FROM notebooks
 		WHERE id = $1
 	`
 
 	row := s.DB.QueryRow(ctx, query, id)
 	var notebook Notebook
-	if err := row.Scan(&notebook.ID, &notebook.Title, &notebook.Content, &notebook.IsPublished, &notebook.CreatedAt, &notebook.UpdatedAt); err != nil {
+	var slug, visibility *string
+	if err := row.Scan(&notebook.ID, &notebook.Title, &notebook.Content, &slug, &visibility, &notebook.IsPublished, &notebook.CreatedAt, &notebook.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
 		}
 		return nil, err
+	}
+	if slug != nil {
+		notebook.Slug = *slug
+	}
+	if visibility != nil {
+		notebook.Visibility = *visibility
 	}
 
 	return []Notebook{notebook}, nil
@@ -225,22 +304,110 @@ func (s *PgxStore) NotebookView(ctx context.Context, id int) ([]Notebook, error)
 
 func (s *PgxStore) CreateDraft(ctx context.Context, params CreateDraftParams) (int, error) {
 	const query = `
-		INSERT INTO notebooks (title, content, is_published, created_at, updated_at)
-		VALUES ($1, $2, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		INSERT INTO notebooks (title, content, slug, visibility, is_published, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		RETURNING id
 	`
 
 	var id int
-	if err := s.DB.QueryRow(ctx, query, params.Title, params.Body).Scan(&id); err != nil {
+	if err := s.DB.QueryRow(ctx, query, params.Title, params.Body, params.Slug, params.Visibility).Scan(&id); err != nil {
 		return 0, err
 	}
 
 	return id, nil
 }
 
+func (s *PgxStore) UpdateDraft(ctx context.Context, params UpdateDraftParams) (revisionID int, err error) {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		rollbackErr := tx.Rollback(ctx)
+		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			err = errors.Join(err, rollbackErr)
+		}
+	}()
+
+	const updateNotebookQuery = `
+		UPDATE notebooks
+		SET title = $1, content = $2, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $3
+	`
+	if _, err = tx.Exec(ctx, updateNotebookQuery, params.Title, params.Body, params.NotebookID); err != nil {
+		return 0, err
+	}
+
+	const insertRevisionQuery = `
+		INSERT INTO notebook_revisions (notebook_id, author_id, title, body, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 'draft', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		RETURNING id
+	`
+	if err = tx.QueryRow(ctx, insertRevisionQuery, params.NotebookID, params.AuthorID, params.Title, params.Body).Scan(&revisionID); err != nil {
+		return 0, err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return revisionID, nil
+}
+
+func (s *PgxStore) ListRecentDrafts(ctx context.Context, authorID int) ([]NotebookRevision, error) {
+	const query = `
+		SELECT id, notebook_id, author_id, title, body, status, created_at, updated_at
+		FROM notebook_revisions
+		WHERE author_id = $1
+		  AND status = 'draft'
+		ORDER BY updated_at DESC
+		LIMIT 6
+	`
+
+	rows, err := s.DB.Query(ctx, query, authorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var revisions []NotebookRevision
+	for rows.Next() {
+		var rev NotebookRevision
+		if err := rows.Scan(&rev.ID, &rev.NotebookID, &rev.AuthorID, &rev.Title, &rev.Body, &rev.Status, &rev.CreatedAt, &rev.UpdatedAt); err != nil {
+			return nil, err
+		}
+		revisions = append(revisions, rev)
+	}
+	return revisions, rows.Err()
+}
+
+func (s *PgxStore) ListAuditEvents(ctx context.Context) ([]AuditEvent, error) {
+	const query = `
+		SELECT id, COALESCE(actor_id, 0), event_type, entity_type, entity_id, created_at
+		FROM audit_events
+		ORDER BY created_at DESC
+		LIMIT 100
+	`
+
+	rows, err := s.DB.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []AuditEvent
+	for rows.Next() {
+		var event AuditEvent
+		if err := rows.Scan(&event.ID, &event.ActorID, &event.EventType, &event.EntityType, &event.EntityID, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
 func scanUser(row pgx.Row) (User, error) {
 	var user User
-	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash); err != nil {
+	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Role); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return User{}, err
 		}
@@ -282,8 +449,14 @@ func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID
 
 	const updateNotebookQuery = `
 		UPDATE notebooks
-		SET current_published_revision_id = $1, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $2
+		SET current_published_revision_id = $1,
+			title = nr.title,
+			content = nr.body,
+			is_published = true,
+			updated_at = CURRENT_TIMESTAMP
+		FROM notebook_revisions nr
+		WHERE notebooks.id = $2
+		  AND nr.id = $1
 	`
 	_, err = tx.Exec(ctx, updateNotebookQuery, revisionID, notebookID)
 	if err != nil {
@@ -295,6 +468,59 @@ func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID
 		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
 	`
 	_, err = tx.Exec(ctx, auditQuery, reviewerID, "revision_approved", "notebook_revision", revisionID)
+	if err != nil {
+		return err
+	}
+
+	const approvalQuery = `
+		INSERT INTO approvals (notebook_revision_id, reviewer_id, decision, created_at)
+		VALUES ($1, $2, 'approved', CURRENT_TIMESTAMP)
+	`
+	_, err = tx.Exec(ctx, approvalQuery, revisionID, reviewerID)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit(ctx)
+	return err
+}
+
+func (s *PgxStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID int) (err error) {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		rollbackErr := tx.Rollback(ctx)
+		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			err = errors.Join(err, rollbackErr)
+		}
+	}()
+
+	const updateRevisionQuery = `
+		UPDATE notebook_revisions
+		SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1
+	`
+	_, err = tx.Exec(ctx, updateRevisionQuery, revisionID)
+	if err != nil {
+		return err
+	}
+
+	const approvalQuery = `
+		INSERT INTO approvals (notebook_revision_id, reviewer_id, decision, created_at)
+		VALUES ($1, $2, 'rejected', CURRENT_TIMESTAMP)
+	`
+	_, err = tx.Exec(ctx, approvalQuery, revisionID, reviewerID)
+	if err != nil {
+		return err
+	}
+
+	const auditQuery = `
+		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, created_at)
+		VALUES ($1, 'revision_rejected', 'notebook_revision', $2, CURRENT_TIMESTAMP)
+	`
+	_, err = tx.Exec(ctx, auditQuery, reviewerID, revisionID)
 	if err != nil {
 		return err
 	}
@@ -340,5 +566,56 @@ func (s *PgxStore) UpdateRevisionStatus(ctx context.Context, params UpdateRevisi
 	`
 
 	_, err := s.DB.Exec(ctx, query, params.Status, params.ID)
+	return err
+}
+
+func (s *PgxStore) CreateModerationFlag(ctx context.Context, params CreateModerationFlagParams) (int, error) {
+	const query = `
+		INSERT INTO moderation_flags (notebook_id, moderator_id, reason, created_at)
+		VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+		RETURNING id
+	`
+
+	var id int
+	err := s.DB.QueryRow(ctx, query, params.NotebookID, params.ModeratorID, params.Reason).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func (s *PgxStore) ListModerationFlags(ctx context.Context) ([]ModerationFlag, error) {
+	const query = `
+		SELECT id, notebook_id, COALESCE(moderator_id, 0), reason, resolved_at, created_at
+		FROM moderation_flags
+		ORDER BY resolved_at NULLS FIRST, created_at DESC
+		LIMIT 100
+	`
+
+	rows, err := s.DB.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var flags []ModerationFlag
+	for rows.Next() {
+		var flag ModerationFlag
+		if err := rows.Scan(&flag.ID, &flag.NotebookID, &flag.ModeratorID, &flag.Reason, &flag.ResolvedAt, &flag.CreatedAt); err != nil {
+			return nil, err
+		}
+		flags = append(flags, flag)
+	}
+	return flags, rows.Err()
+}
+
+func (s *PgxStore) ResolveModerationFlag(ctx context.Context, id int) error {
+	const query = `
+		UPDATE moderation_flags
+		SET resolved_at = CURRENT_TIMESTAMP
+		WHERE id = $1
+	`
+
+	_, err := s.DB.Exec(ctx, query, id)
 	return err
 }

@@ -1,4 +1,4 @@
-package web
+package main
 
 import (
 	"context"
@@ -49,7 +49,7 @@ func newTemplateCache(dir string) (map[string]*template.Template, error) {
 
 	for _, page := range pages {
 		name := filepath.Base(page)
-		ts, err := template.ParseFiles(page)
+		ts, err := template.ParseFiles(filepath.Join(dir, "base.layout.tmpl"), page)
 		if err != nil {
 			return nil, err
 		}
@@ -64,7 +64,7 @@ func main() {
 	csrfSecret := os.Getenv("CSRF_SECRET")
 	if csrfSecret == "" {
 		logger.Warn("CSRF_SECRET not set, using insecure development key")
-		csrfSecret = "dev-only-insecure-csrf-key!!!!!" // exactly 32 bytes
+		csrfSecret = "dev-only-insecure-csrf-key!!!!!!" // exactly 32 bytes
 	}
 	if len(csrfSecret) < 32 {
 		log.Fatalf("CSRF_SECRET must be at least 32 bytes; got %d", len(csrfSecret))
@@ -72,13 +72,22 @@ func main() {
 
 	stateStr := os.Getenv("ENV")
 	if stateStr == "" {
+		stateStr = os.Getenv("ENVIRONMENT")
+	}
+	if stateStr == "" {
 		stateStr = string(Development)
 	}
 	state := State(stateStr)
 
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = "postgres://testuser:testpass@localhost:5433/controlplane_test?sslmode=disable"
+		logger.Warn("DATABASE_URL not set, using local docker-compose.test.yml database")
+	}
+
 	cfg := Config{
 		Port:          6767,
-		Database:      os.Getenv("DATABASE_URL"),
+		Database:      databaseURL,
 		State:         state,
 		SecureCookies: state == Production,
 		CSRFSecret:    []byte(csrfSecret),

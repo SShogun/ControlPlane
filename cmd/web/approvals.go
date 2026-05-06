@@ -1,10 +1,8 @@
-package web
+package main
 
 import (
 	"fmt"
 	"net/http"
-
-	"github.com/SShogun/ControlPlane/internal/data"
 )
 
 func (app *Application) approveRevisionSubmit(w http.ResponseWriter, r *http.Request) {
@@ -13,6 +11,16 @@ func (app *Application) approveRevisionSubmit(w http.ResponseWriter, r *http.Req
 
 	revisionID := app.readIDParam(r, "revID")
 	docID := app.readIDParam(r, "docID")
+	if revisionID == 0 {
+		revisionID = app.readIntForm(r, "revision_id")
+	}
+	if docID == 0 {
+		docID = app.readIntForm(r, "notebook_id")
+	}
+	if revisionID == 0 || docID == 0 {
+		http.Error(w, "invalid approval submission", http.StatusBadRequest)
+		return
+	}
 
 	err := app.store.ApproveRevisionTx(r.Context(), revisionID, docID, reviewer.ID)
 	if err != nil {
@@ -39,18 +47,21 @@ func (app *Application) approvalQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *Application) rejectRevisionSubmit(w http.ResponseWriter, r *http.Request) {
+	reviewer := contextGetUser(r.Context())
 	revisionID := app.readIDParam(r, "revID")
+	if revisionID == 0 {
+		revisionID = app.readIntForm(r, "revision_id")
+	}
+	if revisionID == 0 {
+		http.Error(w, "invalid rejection submission", http.StatusBadRequest)
+		return
+	}
 
-	err := app.store.UpdateRevisionStatus(r.Context(), data.UpdateRevisionStatusParams{
-		Status: "rejected",
-		ID:     revisionID,
-	})
+	err := app.store.RejectRevisionTx(r.Context(), revisionID, reviewer.ID)
 	if err != nil {
 		app.serverError(w, err)
 		return
 	}
-
-	app.logAuditEvent(r, "revision_rejected", "revision", revisionID)
 
 	app.sessionManager.Put(r.Context(), "flash", "Revision rejected.")
 	http.Redirect(w, r, "/approvals", http.StatusSeeOther)

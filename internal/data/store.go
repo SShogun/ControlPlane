@@ -43,6 +43,24 @@ type Tag struct {
 	CreatedAt time.Time
 }
 
+type AuditEvent struct {
+	ID         int
+	ActorID    int
+	EventType  string
+	EntityType string
+	EntityID   int
+	CreatedAt  time.Time
+}
+
+type ModerationFlag struct {
+	ID          int
+	NotebookID  int
+	ModeratorID int
+	Reason      string
+	ResolvedAt  *time.Time
+	CreatedAt   time.Time
+}
+
 type NotebookTag struct {
 	NotebookID int
 	TagID      int
@@ -53,8 +71,12 @@ type UserStore interface {
 	GetUser(ctx context.Context, id int) (User, error)
 	CheckPassword(user User, password string) bool
 	ListNotebooks(ctx context.Context) ([]Notebook, error)
+	SearchNotebooks(ctx context.Context, query string) ([]Notebook, error)
 	NotebookView(ctx context.Context, id int) ([]Notebook, error)
 	CreateDraft(ctx context.Context, params CreateDraftParams) (int, error)
+	UpdateDraft(ctx context.Context, params UpdateDraftParams) (int, error)
+	ListRecentDrafts(ctx context.Context, authorID int) ([]NotebookRevision, error)
+	ListAuditEvents(ctx context.Context) ([]AuditEvent, error)
 	ListTeams(ctx context.Context) ([]Team, error)
 	GetTeam(ctx context.Context, id int) (Team, error)
 	AddMembership(ctx context.Context, userID, teamID int, role string) error
@@ -65,8 +87,12 @@ type UserStore interface {
 	ListNotebookTags(ctx context.Context, notebookID int) ([]Tag, error)
 	InsertAuditLog(ctx context.Context, params InsertAuditLogParams) error
 	ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) error
+	RejectRevisionTx(ctx context.Context, revisionID, reviewerID int) error
 	ListSubmittedRevisions(ctx context.Context) ([]NotebookRevision, error)
 	UpdateRevisionStatus(ctx context.Context, params UpdateRevisionStatusParams) error
+	CreateModerationFlag(ctx context.Context, params CreateModerationFlagParams) (int, error)
+	ListModerationFlags(ctx context.Context) ([]ModerationFlag, error)
+	ResolveModerationFlag(ctx context.Context, id int) error
 }
 
 type Notebook struct {
@@ -91,9 +117,18 @@ type CreateNotebookRevisionParams struct {
 }
 
 type CreateDraftParams struct {
-	AuthorID int
-	Title    string
-	Body     string
+	AuthorID   int
+	Title      string
+	Slug       string
+	Visibility string
+	Body       string
+}
+
+type UpdateDraftParams struct {
+	NotebookID int
+	AuthorID   int
+	Title      string
+	Body       string
 }
 
 type InsertAuditLogParams struct {
@@ -106,4 +141,10 @@ type InsertAuditLogParams struct {
 type UpdateRevisionStatusParams struct {
 	ID     int
 	Status string
+}
+
+type CreateModerationFlagParams struct {
+	NotebookID  int
+	ModeratorID int
+	Reason      string
 }

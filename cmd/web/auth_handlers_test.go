@@ -1,4 +1,4 @@
-package web
+package main
 
 import (
 	"html/template"
@@ -13,7 +13,7 @@ import (
 
 func TestLoginForm(t *testing.T) {
 	app := newTestApplication(nil, map[string]*template.Template{
-		"login.tmpl": parseTemplate("login.tmpl", `<form action="/login" method="post"></form>`),
+		"login.page.tmpl": parseTemplate("login.page.tmpl", `<form action="/login" method="post"></form>`),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)

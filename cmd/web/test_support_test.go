@@ -1,4 +1,4 @@
-package web
+package main
 
 import (
 	"context"
@@ -23,6 +23,8 @@ type fakeStore struct {
 	revisions    map[int][]data.NotebookRevision
 	tags         map[int][]data.Tag
 	submitted    []data.NotebookRevision
+	auditEvents  []data.AuditEvent
+	flags        []data.ModerationFlag
 
 	createDraftCalled    bool
 	createRevisionCalled bool
@@ -36,6 +38,8 @@ type fakeStore struct {
 
 	updateStatusCalled bool
 	updateStatusParams data.UpdateRevisionStatusParams
+
+	rejectCalled bool
 }
 
 func newFakeStore() *fakeStore {
@@ -81,6 +85,10 @@ func (s *fakeStore) ListNotebooks(ctx context.Context) ([]data.Notebook, error) 
 	return notebooks, nil
 }
 
+func (s *fakeStore) SearchNotebooks(ctx context.Context, query string) ([]data.Notebook, error) {
+	return s.ListNotebooks(ctx)
+}
+
 func (s *fakeStore) NotebookView(ctx context.Context, id int) ([]data.Notebook, error) {
 	notebook, ok := s.notebooks[id]
 	if !ok {
@@ -93,6 +101,34 @@ func (s *fakeStore) CreateDraft(ctx context.Context, params data.CreateDraftPara
 	s.createDraftCalled = true
 	s.createDraftParams = params
 	return 1, nil
+}
+
+func (s *fakeStore) UpdateDraft(ctx context.Context, params data.UpdateDraftParams) (int, error) {
+	s.createRevisionCalled = true
+	s.createRevisionParams = data.CreateNotebookRevisionParams{
+		DocumentID: params.NotebookID,
+		AuthorID:   params.AuthorID,
+		Title:      params.Title,
+		Body:       params.Body,
+		Status:     "draft",
+	}
+	return 2, nil
+}
+
+func (s *fakeStore) ListRecentDrafts(ctx context.Context, authorID int) ([]data.NotebookRevision, error) {
+	var drafts []data.NotebookRevision
+	for _, revisions := range s.revisions {
+		for _, revision := range revisions {
+			if revision.AuthorID == authorID && revision.Status == "draft" {
+				drafts = append(drafts, revision)
+			}
+		}
+	}
+	return drafts, nil
+}
+
+func (s *fakeStore) ListAuditEvents(ctx context.Context) ([]data.AuditEvent, error) {
+	return s.auditEvents, nil
 }
 
 func (s *fakeStore) ListTeams(ctx context.Context) ([]data.Team, error) {
@@ -141,6 +177,16 @@ func (s *fakeStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookI
 	return nil
 }
 
+func (s *fakeStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID int) error {
+	s.rejectCalled = true
+	s.updateStatusCalled = true
+	s.updateStatusParams = data.UpdateRevisionStatusParams{
+		ID:     revisionID,
+		Status: "rejected",
+	}
+	return nil
+}
+
 func (s *fakeStore) ListSubmittedRevisions(ctx context.Context) ([]data.NotebookRevision, error) {
 	return s.submitted, nil
 }
@@ -148,6 +194,18 @@ func (s *fakeStore) ListSubmittedRevisions(ctx context.Context) ([]data.Notebook
 func (s *fakeStore) UpdateRevisionStatus(ctx context.Context, params data.UpdateRevisionStatusParams) error {
 	s.updateStatusCalled = true
 	s.updateStatusParams = params
+	return nil
+}
+
+func (s *fakeStore) CreateModerationFlag(ctx context.Context, params data.CreateModerationFlagParams) (int, error) {
+	return 1, nil
+}
+
+func (s *fakeStore) ListModerationFlags(ctx context.Context) ([]data.ModerationFlag, error) {
+	return s.flags, nil
+}
+
+func (s *fakeStore) ResolveModerationFlag(ctx context.Context, id int) error {
 	return nil
 }
 
@@ -171,7 +229,7 @@ func newTestApplication(store *fakeStore, templates map[string]*template.Templat
 }
 
 func parseTemplate(name, body string) *template.Template {
-	return template.Must(template.New(name).Parse(body))
+	return template.Must(template.New(name).Parse(`{{define "base"}}` + body + `{{end}}`))
 }
 
 func addRouteParam(r *http.Request, key, value string) *http.Request {

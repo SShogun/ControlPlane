@@ -1,4 +1,4 @@
-package web
+package main
 
 import (
 	"bytes"
@@ -21,6 +21,8 @@ type templateData struct {
 	CurrentRevision *data.NotebookRevision
 	Tags            []data.Tag
 	Revisions       []data.NotebookRevision
+	AuditEvents     []data.AuditEvent
+	ModerationFlags []data.ModerationFlag
 }
 
 func (app *Application) render(w http.ResponseWriter, r *http.Request, status int, page string, data *templateData) {
@@ -31,7 +33,8 @@ func (app *Application) render(w http.ResponseWriter, r *http.Request, status in
 	}
 
 	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
+	if err := t.ExecuteTemplate(&buf, "base", data); err != nil {
+		app.logger.Error("template execution error", "error", err)
 		http.Error(w, "Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -72,7 +75,23 @@ func (app *Application) logAuditEvent(r *http.Request, action, entityType string
 
 func (app *Application) readIDParam(r *http.Request, name string) int {
 	idStr := chi.URLParam(r, name)
+	if idStr == "" {
+		if err := r.ParseForm(); err == nil {
+			idStr = r.PostForm.Get(name)
+		}
+	}
 	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
+func (app *Application) readIntForm(r *http.Request, name string) int {
+	if err := r.ParseForm(); err != nil {
+		return 0
+	}
+	id, err := strconv.Atoi(r.PostForm.Get(name))
 	if err != nil {
 		return 0
 	}

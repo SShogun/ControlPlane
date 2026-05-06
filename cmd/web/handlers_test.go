@@ -1,4 +1,4 @@
-package web
+package main
 
 import (
 	"context"
@@ -82,6 +82,10 @@ func (m *mockStore) ListNotebooks(ctx context.Context) ([]data.Notebook, error) 
 	return result, nil
 }
 
+func (m *mockStore) SearchNotebooks(ctx context.Context, query string) ([]data.Notebook, error) {
+	return m.ListNotebooks(ctx)
+}
+
 func (m *mockStore) NotebookView(ctx context.Context, id int) ([]data.Notebook, error) {
 	nb, ok := m.notebooks[id]
 	if !ok {
@@ -94,6 +98,34 @@ func (m *mockStore) CreateDraft(ctx context.Context, params data.CreateDraftPara
 	m.createDraftCalled = true
 	m.lastCreateDraftParams = params
 	return 1, nil
+}
+
+func (m *mockStore) UpdateDraft(ctx context.Context, params data.UpdateDraftParams) (int, error) {
+	m.createNotebookRevisionCalled = true
+	m.lastCreateRevisionParams = data.CreateNotebookRevisionParams{
+		DocumentID: params.NotebookID,
+		AuthorID:   params.AuthorID,
+		Title:      params.Title,
+		Body:       params.Body,
+		Status:     "draft",
+	}
+	return 2, nil
+}
+
+func (m *mockStore) ListRecentDrafts(ctx context.Context, authorID int) ([]data.NotebookRevision, error) {
+	var result []data.NotebookRevision
+	for _, revisions := range m.revisions {
+		for _, revision := range revisions {
+			if revision.AuthorID == authorID && revision.Status == "draft" {
+				result = append(result, revision)
+			}
+		}
+	}
+	return result, nil
+}
+
+func (m *mockStore) ListAuditEvents(ctx context.Context) ([]data.AuditEvent, error) {
+	return nil, nil
 }
 
 func (m *mockStore) ListTeams(ctx context.Context) ([]data.Team, error) {
@@ -148,11 +180,27 @@ func (m *mockStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookI
 	return nil
 }
 
+func (m *mockStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID int) error {
+	return m.UpdateRevisionStatus(ctx, data.UpdateRevisionStatusParams{ID: revisionID, Status: "rejected"})
+}
+
 func (m *mockStore) ListSubmittedRevisions(ctx context.Context) ([]data.NotebookRevision, error) {
 	return []data.NotebookRevision{}, nil
 }
 
 func (m *mockStore) UpdateRevisionStatus(ctx context.Context, params data.UpdateRevisionStatusParams) error {
+	return nil
+}
+
+func (m *mockStore) CreateModerationFlag(ctx context.Context, params data.CreateModerationFlagParams) (int, error) {
+	return 1, nil
+}
+
+func (m *mockStore) ListModerationFlags(ctx context.Context) ([]data.ModerationFlag, error) {
+	return nil, nil
+}
+
+func (m *mockStore) ResolveModerationFlag(ctx context.Context, id int) error {
 	return nil
 }
 
@@ -277,9 +325,8 @@ func TestLoginFormGET(t *testing.T) {
 	store := newMockStore()
 	sessionManager := scs.New()
 
-	tmpl := template.Must(template.New("login.tmpl").Parse("<form action=\"/login\" method=\"post\"></form>"))
 	cache := map[string]*template.Template{
-		"login.tmpl": tmpl,
+		"login.page.tmpl": parseTemplate("login.page.tmpl", "<form action=\"/login\" method=\"post\"></form>"),
 	}
 
 	app := &Application{
@@ -332,9 +379,8 @@ func TestNotebookCreateSubmitInvalidForm(t *testing.T) {
 	store := newMockStore()
 	sessionManager := scs.New()
 
-	tmpl := template.Must(template.New("notebook-create.page.tmpl").Parse("invalid form"))
 	cache := map[string]*template.Template{
-		"notebook-create.page.tmpl": tmpl,
+		"notebook-create.page.tmpl": parseTemplate("notebook-create.page.tmpl", "invalid form"),
 	}
 
 	app := &Application{
@@ -376,6 +422,8 @@ func TestNotebookCreateSubmitValidForm(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("title", "My first notebook")
+	form.Set("slug", "my-first-notebook")
+	form.Set("visibility", "private")
 	form.Set("body", "Hello from tests")
 
 	baseReq := httptest.NewRequest(http.MethodPost, "/notebooks/new", strings.NewReader(form.Encode()))
@@ -448,9 +496,8 @@ func TestNotebookViewValidID(t *testing.T) {
 	store.tags[1] = []data.Tag{{ID: 1, Name: "go"}, {ID: 2, Name: "backend"}}
 
 	sessionManager := scs.New()
-	tmpl := template.Must(template.New("notebook-view.page.tmpl").Parse("{{if .CurrentRevision}}{{.CurrentRevision.Title}}{{end}}|{{len .Tags}}"))
 	cache := map[string]*template.Template{
-		"notebook-view.page.tmpl": tmpl,
+		"notebook-view.page.tmpl": parseTemplate("notebook-view.page.tmpl", "{{if .CurrentRevision}}{{.CurrentRevision.Title}}{{end}}|{{len .Tags}}"),
 	}
 
 	app := &Application{

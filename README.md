@@ -549,6 +549,28 @@ go test -v ./...
 
 The app listens on `:6767` by default.
 
+## Screenshots & Demo
+
+Below are quick screenshots of the running application (placeholder SVGs provided under `ui/screenshots/`). Replace these with real PNG/GIF exports for richer visuals in the repo.
+
+- Landing page: ![Landing](/ui/screenshots/01-landing.png)
+- Dashboard (charlie): ![Dashboard](/ui/screenshots/02-dashboard-charlie.png)
+- Create new draft: ![Create Draft](/ui/screenshots/03-create-draft.png)
+- Approval queue: ![Approval Queue](/ui/screenshots/04-approval-queue.png)
+- Audit logs: ![Audit Logs](/ui/screenshots/05-audit-logs.png)   
+
+Demo video / context:
+
+The author recorded a 6-minute walkthrough — see the post on X:
+
+[Demo Walkthrough on X](https://x.com/SShogunCodes/status/2052252087270986204)
+
+How to replace placeholders:
+
+1. Capture screenshots (PNG or GIF) of the running app.
+2. Save them under `ui/screenshots/` using the same numeric prefixes (e.g. `01-landing.png`).
+3. Update README image links if you prefer `.png` files.
+
 ---
 
 ## Development Roadmap

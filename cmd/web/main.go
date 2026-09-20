@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"html/template"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/SShogun/ControlPlane/internal/data"
@@ -40,6 +44,11 @@ type Application struct {
 	templateCache  map[string]*template.Template
 }
 
+type gracefulServer interface {
+	ListenAndServe() error
+	Shutdown(context.Context) error
+}
+
 func newTemplateCache(dir string) (map[string]*template.Template, error) {
 	cache := map[string]*template.Template{}
 	pages, err := filepath.Glob(filepath.Join(dir, "*.page.tmpl"))
@@ -58,16 +67,44 @@ func newTemplateCache(dir string) (map[string]*template.Template, error) {
 	return cache, nil
 }
 
-func main() {
+func serve(ctx context.Context, server gracefulServer, shutdownTimeout time.Duration) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil || errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return fmt.Errorf("serve: listen: %w", err)
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("serve: shutdown: %w", err)
+		}
+
+		err := <-errCh
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve: listen after shutdown: %w", err)
+		}
+		return nil
+	}
+}
+
+func run() error {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	csrfSecret := os.Getenv("CSRF_SECRET")
 	if csrfSecret == "" {
 		logger.Warn("CSRF_SECRET not set, using insecure development key")
-		csrfSecret = "dev-only-insecure-csrf-key!!!!!!" // exactly 32 bytes
+		csrfSecret = "dev-only-insecure-csrf-key!!!!!!"
 	}
 	if len(csrfSecret) < 32 {
-		log.Fatalf("CSRF_SECRET must be at least 32 bytes; got %d", len(csrfSecret))
+		return fmt.Errorf("CSRF_SECRET must be at least 32 bytes; got %d", len(csrfSecret))
 	}
 
 	stateStr := os.Getenv("ENV")
@@ -96,12 +133,15 @@ func main() {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.Database)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("open database pool: %w", err)
 	}
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := pool.Ping(pingCtx); err != nil {
-		log.Fatalf("Database not reachable: %v", err)
+	defer pool.Close()
+
+	pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
+	err = pool.Ping(pingCtx)
+	cancelPing()
+	if err != nil {
+		return fmt.Errorf("database not reachable: %w", err)
 	}
 
 	sessionManager := scs.New()
@@ -115,7 +155,7 @@ func main() {
 
 	templateCache, err := newTemplateCache("./ui/templates")
 	if err != nil {
-		log.Fatalf("failed to build template cache: %v", err)
+		return fmt.Errorf("build template cache: %w", err)
 	}
 
 	app := &Application{
@@ -133,7 +173,19 @@ func main() {
 		WriteTimeout: 30 * time.Second,
 	}
 
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("server failed: %v", err)
+	serverCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	logger.Info("server starting", "addr", server.Addr)
+	if err := serve(serverCtx, &server, 10*time.Second); err != nil {
+		return err
+	}
+	logger.Info("server stopped")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
 	}
 }

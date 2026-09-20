@@ -82,9 +82,9 @@ This is not a blog, not a todo app, and not a public wiki. It is an operational 
 
 ## Current Status
 
-> **Phase 5 — Production Hardening** (Complete)
+> **Phase 5 — Repository Hardening** (CI-verified)
 
-Phase 5 test files, integration tests, rate limiting, and CI pipelines are now complete. The backend is fully hardened for production use.
+Phase 5 covers application-level hardening: tests, CI, lifecycle handling, and documentation/implementation parity. This is **not** a claim of production deployment readiness; metrics/tracing, container/Kubernetes deployment, health/readiness probes, and shared rate limiting remain future work. See [ARCHITECTURE_STATUS.md](./ARCHITECTURE_STATUS.md) for the as-built boundary.
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -93,7 +93,7 @@ Phase 5 test files, integration tests, rate limiting, and CI pipelines are now c
 | Phase 2 | Forms, validation, sessions, auth, context | ✅ Complete |
 | Phase 3 | Notebooks, revisions, tags, search, DB-backed pages | ✅ Complete |
 | Phase 4 | Approvals, audit, moderation, governance | ✅ Complete |
-| Phase 5 | Tests, CI, production hardening | ✅ Complete |
+| Phase 5 | Tests, CI, graceful lifecycle, repository hardening | ✅ Complete |
 | Phase 6 | Advanced: Metrics, Tracing, Docker/K8s, Shared Rate Limiting | 🚧 Planned |
 
 ---
@@ -103,7 +103,7 @@ Phase 5 test files, integration tests, rate limiting, and CI pipelines are now c
 The architecture is intentionally conservative and explicit:
 
 - `main.go` builds the long-lived dependencies once
-- an `Application` struct carries shared dependencies (config, DB pool, session manager, template cache)
+- an `Application` struct carries config, logger, `UserStore`, session manager, and template cache; `run()` owns the PostgreSQL pool lifecycle
 - `app.routes()` builds the router and middleware graph
 - handlers are methods on `app`
 - request-scoped data lives in `*http.Request` and `Context`, not on global variables
@@ -147,7 +147,7 @@ Browser
 
 | Concept | Scope | Storage | Example |
 |---------|-------|---------|---------|
-| Application | server lifetime | process memory | DB pool, session manager, template cache |
+| Process dependencies | server lifetime | `run()` + `Application` | PostgreSQL pool, store, session manager, template cache |
 | Session | many requests | DB/cookie-backed | `userID`, flash message |
 | Context | one request | memory | current loaded user pointer |
 
@@ -207,7 +207,8 @@ ControlPlane/
 │       └── audit.sql.go
 ├── migrations/
 │   ├── 0001_initial_schema.sql    # Core tables, indexes, constraints
-│   └── 0002_create_audit_logs.sql # Audit log table
+│   ├── 0002_create_audit_logs.sql # Audit log table
+│   └── 0003_create_sessions_table.sql # scs PostgreSQL session table
 ├── ui/templates/                  # Server-rendered HTML templates
 ├── docs/                          # Architecture and study documentation
 │   ├── Control Plane Notebook Architecture.md
@@ -222,7 +223,7 @@ ControlPlane/
 ├── sqlc.yaml                      # sqlc configuration
 ├── go.mod
 ├── go.sum
-├── .env
+├── ARCHITECTURE_STATUS.md
 └── .gitignore
 ```
 
@@ -237,7 +238,6 @@ The `Application` struct is dependency injection in plain Go. It avoids globals,
 ```go
 type Application struct {
     config         Config
-    conn           *pgxpool.Pool
     logger         *slog.Logger
     store          data.UserStore
     sessionManager *scs.SessionManager
@@ -260,7 +260,8 @@ type UserStore interface {
     ListNotebookRevisions(ctx context.Context, notebookID int) ([]NotebookRevision, error)
     ListNotebookTags(ctx context.Context, notebookID int) ([]Tag, error)
     InsertAuditLog(ctx context.Context, params InsertAuditLogParams) error
-    ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) error
+    ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int, note string) error
+    RejectRevisionTx(ctx context.Context, revisionID, reviewerID int, note string) error
     ListSubmittedRevisions(ctx context.Context) ([]NotebookRevision, error)
     UpdateRevisionStatus(ctx context.Context, params UpdateRevisionStatusParams) error
     // ... and more
@@ -417,6 +418,7 @@ Without this split, drafts and approvals become fragile because you keep overwri
 | `GET` | `/notebooks/{id}/edit` | `notebookEditForm` | Edit draft form |
 | `POST` | `/notebooks/{id}/edit` | `notebookEditSubmit` | Submit draft edit |
 | `POST` | `/notebooks/{id}/submit` | `notebookSubmitForApproval` | Submit latest draft revision for review |
+| `POST` | `/notebooks/{id}/delete` | `notebookDeleteSubmit` | Delete notebook |
 | `POST` | `/notebooks/{id}/flag` | `notebookFlagSubmit` | Create a moderation flag |
 | `GET` | `/notebooks/search` | `notebooksSearch` | Search notebooks |
 
@@ -425,6 +427,7 @@ Without this split, drafts and approvals become fragile because you keep overwri
 | Method | Path | Handler | Description |
 |--------|------|---------|-------------|
 | `GET` | `/approvals` | `approvalQueue` | Submitted revisions queue |
+| `GET` | `/approvals/{id}` | `approvalReviewView` | Review one submitted revision |
 | `POST` | `/approvals/approve` | `approveRevisionSubmit` | Approve and publish revision |
 | `POST` | `/approvals/reject` | `rejectRevisionSubmit` | Reject revision |
 | `GET` | `/moderation` | `moderationQueue` | Moderation flag queue |
@@ -434,6 +437,9 @@ Without this split, drafts and approvals become fragile because you keep overwri
 
 | Method | Path | Handler | Description |
 |--------|------|---------|-------------|
+| `GET` | `/admin/teams` | `adminTeams` | Team administration page |
+| `POST` | `/admin/teams` | `adminTeamOnboardSubmit` | Onboard team/membership data |
+| `POST` | `/admin/notebooks/{id}/delete` | `adminNotebookDeleteSubmit` | Administrative notebook deletion |
 | `GET` | `/admin/audit` | `adminAudit` | Audit event log |
 
 ---
@@ -465,8 +471,12 @@ serveWithSession(app, handler, request)
 | `middleware_test.go` | Auth redirect, role enforcement | 3 |
 | `auth_handlers_test.go` | Login form, credentials, logout | 4 |
 | `notebook_handlers_test.go` | Create draft, view, validation | 4 |
-| `approval_handlers_test.go` | Approve/reject transactions | 2 |
-| `handlers_test.go` | Full handler integration tests | 10+ |
+| `approval_handlers_test.go` | Approve/reject handler behavior | focused |
+| `csrf_test.go` | CSRF enforcement and form behavior | focused |
+| `ui_smoke_test.go` | Representative rendered routes | smoke |
+| `main_test.go` | Graceful server lifecycle | 3 |
+| `handlers_test.go` | Broader handler coverage | legacy/focused |
+| `internal/data/store_test.go` | Real PostgreSQL data-path checks | integration |
 
 ### Running Tests
 
@@ -478,31 +488,16 @@ go test -v ./...
 
 ## CI/CD Pipeline
 
-GitHub Actions runs on every push to `main` and on pull requests:
+GitHub Actions runs on all pushes and pull requests. The repository default branch is `master`, and the workflow is not restricted to a stale `main` branch filter:
 
 ```yaml
-name: CI Pipeline
+name: CI
 
-on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
+on: [push, pull_request]
 
-jobs:
-  test-and-build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository code
-        uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.0'
-      - name: Run Go tests
-        run: go test -v ./...
-      - name: Build application
-        run: go build -v ./...
+# PostgreSQL service + checked-in migrations
+# Go version is read from go.mod
+# Gates: gofmt, go vet, race-enabled tests, build, golangci-lint
 ```
 
 ---
@@ -598,7 +593,7 @@ gantt
 
     section Phase 5
     Tests & CI                         :done, p5, after p4, 14d
-    Production hardening               :done, p5b, after p5, 14d
+    Repository hardening               :done, p5b, after p5, 14d
 
     section Phase 6 (Advanced)
     Metrics & Tracing                  :        p6a, after p5b, 14d
@@ -645,7 +640,7 @@ gantt
 - Moderation flags table
 - Admin audit page
 
-### Phase 5 — Production Hardening ✅
+### Phase 5 — Repository Hardening ✅
 
 - [x] Test infrastructure: `fakeStore`, `newTestApplication`, `serveWithSession`
 - [x] Context helper tests
@@ -657,8 +652,8 @@ gantt
 - [x] GitHub Actions CI pipeline
 - [x] CI pipeline refinement and edge cases
 - [x] Structured error handling improvements
-- [x] Request logging and observability
-- [x] Graceful shutdown
+- [x] Request logging via chi middleware
+- [x] Graceful SIGINT/SIGTERM HTTP shutdown with PostgreSQL pool cleanup
 
 ### Phase 6 — Advanced Production Ops 🚧 (Future)
 
@@ -691,7 +686,8 @@ Project documentation lives in [`docs/`](./docs):
 
 | Document | Description |
 |----------|-------------|
-| [Architecture Guide](./docs/Control%20Plane%20Notebook%20Architecture.md) | System design and component relationships |
+| [As-Built Architecture Status](./ARCHITECTURE_STATUS.md) | Current implementation boundary, runtime semantics, and explicit non-goals |
+| [Architecture Guide](./docs/Control%20Plane%20Notebook%20Architecture.md) | Historical/system design and component relationships |
 | [Reading Map](./docs/Control%20Plane%20Notebook%20Reading%20Map.md) | Recommended study order |
 | [Notebook vs Ledger API](./docs/Control%20Plane%20Notebook%20vs%20Ledger%20API.md) | Design comparison |
 | [Phase 0-1 Wiring Recipe](./docs/Phase%200-1%20Wiring%20Recipe.md) | Foundation build guide |

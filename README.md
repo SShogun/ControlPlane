@@ -595,8 +595,12 @@ gantt
     Tests & CI                         :done, p5, after p4, 14d
     Repository hardening               :done, p5b, after p5, 14d
 
+    section Phase 5.5
+    Domain & correctness hardening     :        p55a, after p5b, 14d
+    Concurrency & invariant tests      :        p55b, after p55a, 14d
+
     section Phase 6 (Advanced)
-    Metrics & Tracing                  :        p6a, after p5b, 14d
+    Metrics & Tracing                  :        p6a, after p55b, 14d
     K8s & Shared Limiting              :        p6b, after p6a, 14d
 ```
 
@@ -654,6 +658,23 @@ gantt
 - [x] Structured error handling improvements
 - [x] Request logging via chi middleware
 - [x] Graceful SIGINT/SIGTERM HTTP shutdown with PostgreSQL pool cleanup
+
+### Phase 5.5 — Domain & Correctness Hardening 🚧 (Next)
+
+The goal of this phase is to move correctness guarantees out of optimistic handler logic and into explicit authorization policy, transactional store operations, and database-enforced invariants.
+
+- [ ] Centralize authorization policy for notebook ownership, team membership, visibility, editing, submission, review, moderation, and deletion.
+- [ ] Make notebook creation atomic: notebook row, initial revision, tags, and audit event succeed or fail together.
+- [ ] Make draft editing transactional so content, revision history, tags, and audit state cannot diverge after partial failures.
+- [ ] Make submission transactional so the state transition and audit record commit together.
+- [ ] Guard lifecycle transitions in the data layer (for example, only `draft -> submitted` and `submitted -> approved/rejected`).
+- [ ] Reject stale, repeated, or invalid transitions by checking affected rows and returning explicit domain errors.
+- [ ] Prevent double approval/rejection under concurrent reviewer actions using row locking or optimistic concurrency.
+- [ ] Add database constraints/indexes for workflow invariants, including preventing conflicting decisions for one revision.
+- [ ] Add PostgreSQL integration tests for unauthorized access, invalid transitions, duplicate decisions, rollback behavior, and concurrent approval attempts.
+- [ ] Add race/failure-path tests around the workflow boundary rather than testing only happy-path handlers.
+- [ ] Align README/demo claims with the actual authorization and transactional guarantees.
+- [ ] Merge the hardening branch once these invariants are verified so the default branch reflects the portfolio-ready state.
 
 ### Phase 6 — Advanced Production Ops 🚧 (Future)
 

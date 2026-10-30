@@ -46,7 +46,7 @@ The one-sentence architecture rule is: `main.go` builds the app once, `app.route
 
 ### cmd/web/approvals.go
 
-`cmd/web/approvals.go` owns reviewer approval handlers. It lists submitted revisions, approves a revision through `ApproveRevisionTx`, rejects a revision through `UpdateRevisionStatus`, writes flash messages, and redirects after POST requests. Login, template cache creation, and raw route setup do not belong here. A concrete example is `app.approveRevisionSubmit`, which calls `app.store.ApproveRevisionTx(...)`.
+`cmd/web/approvals.go` owns reviewer approval handlers. It lists submitted revisions, approves a revision through `ApproveRevisionTx`, rejects a revision through `RejectRevisionTx`, writes flash messages, and redirects after POST requests. Login, template cache creation, and raw route setup do not belong here. A concrete example is `app.approveRevisionSubmit`, which calls `app.store.ApproveRevisionTx(...)`.
 
 ### cmd/web/admin.go
 

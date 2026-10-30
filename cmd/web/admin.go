@@ -112,48 +112,26 @@ func (app *Application) deleteNotebookIfAllowed(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	revisions, err := app.store.ListNotebookRevisions(r.Context(), notebookID)
+	if user == nil {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	result, err := app.store.DeleteNotebookAs(r.Context(), notebookID, user.ID, allowAdminPublished)
 	if err != nil {
-		app.serverError(w, err)
+		app.handleDraftError(w, r, notebookID, err)
 		return
 	}
-	if len(revisions) == 0 {
-		http.NotFound(w, r)
-		return
-	}
-
-	current := revisions[0]
-	action := ""
-	entityType := "notebook"
-	entityID := notebookID
+	current := result.Revision
+	action := "draft_deleted"
+	entityType := "notebook_revision"
+	entityID := current.ID
 	details := fmt.Sprintf(`{"title": %q, "status": %q}`, current.Title, current.Status)
 	redirectTo := "/dashboard"
-
-	if current.Status == "draft" && user.ID == current.AuthorID {
-		action = "draft_deleted"
-		entityType = "notebook_revision"
-		entityID = current.ID
-		if len(revisions) == 1 {
-			if err := app.store.DeleteNotebook(r.Context(), notebookID); err != nil {
-				app.serverError(w, err)
-				return
-			}
-		} else {
-			if err := app.store.DeleteNotebookRevision(r.Context(), current.ID); err != nil {
-				app.serverError(w, err)
-				return
-			}
-		}
-	} else if allowAdminPublished && user.Role == "admin" && current.Status == "approved" {
+	if current.Status == "approved" {
 		action = "notebook_deleted"
+		entityType = "notebook"
+		entityID = notebookID
 		redirectTo = "/admin/teams"
-		if err := app.store.DeleteNotebook(r.Context(), notebookID); err != nil {
-			app.serverError(w, err)
-			return
-		}
-	} else {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
 	}
 
 	app.logAuditEvent(r, action, entityType, entityID, details)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -132,6 +133,34 @@ func (app *Application) notebookView(w http.ResponseWriter, r *http.Request) {
 	app.render(w, r, http.StatusOK, "notebook-view.page.tmpl", viewData)
 }
 
+func (app *Application) handleDraftError(w http.ResponseWriter, r *http.Request, notebookID int, err error) {
+	switch {
+	case errors.Is(err, data.ErrNotFound):
+		http.NotFound(w, r)
+	case errors.Is(err, data.ErrForbidden):
+		http.Error(w, "forbidden", http.StatusForbidden)
+	case errors.Is(err, data.ErrNotDraft):
+		app.sessionManager.Put(r.Context(), "flash", "Only draft revisions can be modified.")
+		http.Redirect(w, r, fmt.Sprintf("/notebooks/%d", notebookID), http.StatusSeeOther)
+	default:
+		app.serverError(w, err)
+	}
+}
+
+func (app *Application) editableDraft(w http.ResponseWriter, r *http.Request, notebookID int) (data.NotebookRevision, bool) {
+	user := contextGetUser(r.Context())
+	if user == nil {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return data.NotebookRevision{}, false
+	}
+	revision, err := app.store.GetEditableDraft(r.Context(), notebookID, user.ID)
+	if err != nil {
+		app.handleDraftError(w, r, notebookID, err)
+		return data.NotebookRevision{}, false
+	}
+	return revision, true
+}
+
 func (app *Application) notebookEditForm(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.Atoi(idStr)
@@ -140,21 +169,16 @@ func (app *Application) notebookEditForm(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	revisions, err := app.store.ListNotebookRevisions(r.Context(), id)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-	if len(revisions) == 0 {
-		http.NotFound(w, r)
+	revision, ok := app.editableDraft(w, r, id)
+	if !ok {
 		return
 	}
 
 	td := app.newTemplateData(r)
-	td.CurrentRevision = &revisions[0]
+	td.CurrentRevision = &revision
 	td.Form = notebookForm{
-		Title: revisions[0].Title,
-		Body:  revisions[0].Body,
+		Title: revision.Title,
+		Body:  revision.Body,
 	}
 	tags, err := app.store.ListNotebookTags(r.Context(), id)
 	if err != nil {
@@ -166,8 +190,8 @@ func (app *Application) notebookEditForm(w http.ResponseWriter, r *http.Request)
 		tagNames = append(tagNames, tag.Name)
 	}
 	td.Form = notebookForm{
-		Title: revisions[0].Title,
-		Body:  revisions[0].Body,
+		Title: revision.Title,
+		Body:  revision.Body,
 		Tags:  strings.Join(tagNames, ", "),
 	}
 	app.render(w, r, http.StatusOK, "notebook-edit.page.tmpl", td)
@@ -182,19 +206,8 @@ func (app *Application) notebookEditSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Check if the latest revision is a draft
-	revisions, err := app.store.ListNotebookRevisions(r.Context(), notebookID)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-	if len(revisions) == 0 {
-		http.NotFound(w, r)
-		return
-	}
-	if revisions[0].Status != "draft" {
-		app.sessionManager.Put(r.Context(), "flash", "You can only edit draft revisions")
-		http.Redirect(w, r, fmt.Sprintf("/notebooks/%d", notebookID), http.StatusSeeOther)
+	revision, ok := app.editableDraft(w, r, notebookID)
+	if !ok {
 		return
 	}
 
@@ -213,17 +226,8 @@ func (app *Application) notebookEditSubmit(w http.ResponseWriter, r *http.Reques
 	form.Check(validator.MaxChars(form.Body, 50000), "body", "Body must be 50,000 characters or less")
 
 	if !form.Valid() {
-		revisions, err := app.store.ListNotebookRevisions(r.Context(), notebookID)
-		if err != nil {
-			app.serverError(w, err)
-			return
-		}
 		td := app.newTemplateData(r)
-		if len(revisions) > 0 {
-			td.CurrentRevision = &revisions[0]
-		} else {
-			td.CurrentRevision = &data.NotebookRevision{NotebookID: notebookID}
-		}
+		td.CurrentRevision = &revision
 		td.Form = form
 		td.Errors = form.FieldErrors
 		app.render(w, r, http.StatusUnprocessableEntity, "notebook-edit.page.tmpl", td)
@@ -235,13 +239,10 @@ func (app *Application) notebookEditSubmit(w http.ResponseWriter, r *http.Reques
 		AuthorID:   user.ID,
 		Title:      form.Title,
 		Body:       form.Body,
+		Tags:       parseTags(form.Tags),
 	})
 	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-	if err := app.attachTagsFromInput(r, notebookID, form.Tags); err != nil {
-		app.serverError(w, err)
+		app.handleDraftError(w, r, notebookID, err)
 		return
 	}
 
@@ -292,20 +293,7 @@ func (app *Application) notebookSubmitForApproval(w http.ResponseWriter, r *http
 		return
 	}
 
-	revisions, err := app.store.ListNotebookRevisions(r.Context(), notebookID)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-	if len(revisions) == 0 {
-		http.NotFound(w, r)
-		return
-	}
-
-	revision := revisions[0]
-	if revision.Status != "draft" {
-		app.sessionManager.Put(r.Context(), "flash", "Only draft revisions can be submitted for approval.")
-		http.Redirect(w, r, fmt.Sprintf("/notebooks/%d", notebookID), http.StatusSeeOther)
+	if _, ok := app.editableDraft(w, r, notebookID); !ok {
 		return
 	}
 
@@ -315,16 +303,14 @@ func (app *Application) notebookSubmitForApproval(w http.ResponseWriter, r *http
 	}
 	msg := r.PostForm.Get("message")
 
-	err = app.store.UpdateRevisionStatus(r.Context(), data.UpdateRevisionStatusParams{
-		ID:     revision.ID,
-		Status: "submitted",
-	})
+	user := contextGetUser(r.Context())
+	revisionID, err := app.store.SubmitDraft(r.Context(), notebookID, user.ID)
 	if err != nil {
-		app.serverError(w, err)
+		app.handleDraftError(w, r, notebookID, err)
 		return
 	}
 
-	app.logAuditEvent(r, "revision_submitted", "notebook_revision", revision.ID, fmt.Sprintf(`{"message": %q}`, msg))
+	app.logAuditEvent(r, "revision_submitted", "notebook_revision", revisionID, fmt.Sprintf(`{"message": %q}`, msg))
 	app.sessionManager.Put(r.Context(), "flash", "Draft submitted for approval.")
 	http.Redirect(w, r, fmt.Sprintf("/notebooks/%d", notebookID), http.StatusSeeOther)
 }
@@ -350,12 +336,18 @@ func (app *Application) notebooksSearch(w http.ResponseWriter, r *http.Request) 
 	app.render(w, r, http.StatusOK, "notebooks-search.page.tmpl", td)
 }
 
-func (app *Application) attachTagsFromInput(r *http.Request, notebookID int, input string) error {
-	for _, rawTag := range strings.Split(input, ",") {
-		name := strings.ToLower(strings.TrimSpace(rawTag))
-		if name == "" {
-			continue
+func parseTags(input string) []string {
+	var tags []string
+	for _, raw := range strings.Split(input, ",") {
+		if name := strings.ToLower(strings.TrimSpace(raw)); name != "" {
+			tags = append(tags, name)
 		}
+	}
+	return tags
+}
+
+func (app *Application) attachTagsFromInput(r *http.Request, notebookID int, input string) error {
+	for _, name := range parseTags(input) {
 		tagID, err := app.store.CreateTag(r.Context(), name)
 		if err != nil {
 			return err

@@ -17,15 +17,17 @@ import (
 var errTestNotFound = errors.New("test record not found")
 
 type fakeStore struct {
-	usersByID    map[int]data.User
-	usersByEmail map[string]data.User
-	notebooks    map[int]data.Notebook
-	revisions    map[int][]data.NotebookRevision
-	tags         map[int][]data.Tag
-	nextUserID   int
-	submitted    []data.NotebookRevision
-	auditEvents  []data.AuditEvent
-	flags        []data.ModerationFlag
+	usersByID      map[int]data.User
+	usersByEmail   map[string]data.User
+	notebooks      map[int]data.Notebook
+	revisions      map[int][]data.NotebookRevision
+	tags           map[int][]data.Tag
+	memberships    map[int]map[int]bool // team ID -> user ID -> member
+	nextUserID     int
+	nextRevisionID int
+	submitted      []data.NotebookRevision
+	auditEvents    []data.AuditEvent
+	flags          []data.ModerationFlag
 
 	createDraftCalled    bool
 	createRevisionCalled bool
@@ -40,17 +42,24 @@ type fakeStore struct {
 	updateStatusCalled bool
 	updateStatusParams data.UpdateRevisionStatusParams
 
-	rejectCalled bool
+	rejectCalled     bool
+	updateDraftCalls int
+	submitDraftCalls int
+	auditInsertCalls int
+	tagCreateCalls   int
+	tagAttachCalls   int
 }
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		usersByID:    map[int]data.User{},
-		usersByEmail: map[string]data.User{},
-		notebooks:    map[int]data.Notebook{},
-		revisions:    map[int][]data.NotebookRevision{},
-		tags:         map[int][]data.Tag{},
-		nextUserID:   1,
+		usersByID:      map[int]data.User{},
+		usersByEmail:   map[string]data.User{},
+		notebooks:      map[int]data.Notebook{},
+		revisions:      map[int][]data.NotebookRevision{},
+		tags:           map[int][]data.Tag{},
+		memberships:    map[int]map[int]bool{},
+		nextUserID:     1,
+		nextRevisionID: 1,
 	}
 }
 
@@ -120,6 +129,12 @@ func (s *fakeStore) CreateDraft(ctx context.Context, params data.CreateDraftPara
 }
 
 func (s *fakeStore) UpdateDraft(ctx context.Context, params data.UpdateDraftParams) (int, error) {
+	current, err := s.GetEditableDraft(ctx, params.NotebookID, params.AuthorID)
+	if err != nil {
+		return 0, err
+	}
+	_ = current
+	s.updateDraftCalls++
 	s.createRevisionCalled = true
 	s.createRevisionParams = data.CreateNotebookRevisionParams{
 		DocumentID: params.NotebookID,
@@ -128,7 +143,53 @@ func (s *fakeStore) UpdateDraft(ctx context.Context, params data.UpdateDraftPara
 		Body:       params.Body,
 		Status:     "draft",
 	}
-	return 2, nil
+	revision := data.NotebookRevision{
+		ID:         s.nextRevisionID,
+		NotebookID: params.NotebookID,
+		AuthorID:   params.AuthorID,
+		Title:      params.Title,
+		Body:       params.Body,
+		Status:     "draft",
+	}
+	s.nextRevisionID++
+	s.revisions[params.NotebookID] = append([]data.NotebookRevision{revision}, s.revisions[params.NotebookID]...)
+	for _, name := range params.Tags {
+		s.tagCreateCalls++
+		tag := data.Tag{ID: s.tagCreateCalls, Name: name}
+		s.tags[params.NotebookID] = append(s.tags[params.NotebookID], tag)
+		s.tagAttachCalls++
+	}
+	return revision.ID, nil
+}
+
+func (s *fakeStore) GetEditableDraft(ctx context.Context, notebookID, actorID int) (data.NotebookRevision, error) {
+	notebook, ok := s.notebooks[notebookID]
+	if !ok {
+		return data.NotebookRevision{}, data.ErrNotFound
+	}
+	revisions := s.revisions[notebookID]
+	if len(revisions) == 0 {
+		return data.NotebookRevision{}, data.ErrNotFound
+	}
+	current := revisions[0]
+	member := notebook.TeamID == 0 || s.memberships[notebook.TeamID][actorID]
+	if actorID <= 0 || current.AuthorID != actorID || !member {
+		return data.NotebookRevision{}, data.ErrForbidden
+	}
+	if current.Status != "draft" {
+		return data.NotebookRevision{}, data.ErrNotDraft
+	}
+	return current, nil
+}
+
+func (s *fakeStore) SubmitDraft(ctx context.Context, notebookID, actorID int) (int, error) {
+	current, err := s.GetEditableDraft(ctx, notebookID, actorID)
+	if err != nil {
+		return 0, err
+	}
+	s.submitDraftCalls++
+	s.revisions[notebookID][0].Status = "submitted"
+	return current.ID, nil
 }
 
 func (s *fakeStore) ListRecentDrafts(ctx context.Context, authorID int) ([]data.NotebookRevision, error) {
@@ -165,6 +226,35 @@ func (s *fakeStore) DeleteNotebook(ctx context.Context, notebookID int) error {
 	return nil
 }
 
+func (s *fakeStore) DeleteNotebookAs(ctx context.Context, notebookID, actorID int, adminPublished bool) (data.DeleteNotebookResult, error) {
+	notebook, ok := s.notebooks[notebookID]
+	if !ok {
+		return data.DeleteNotebookResult{}, data.ErrNotFound
+	}
+	revisions := s.revisions[notebookID]
+	if len(revisions) == 0 {
+		return data.DeleteNotebookResult{}, data.ErrNotFound
+	}
+	current := revisions[0]
+	member := notebook.TeamID == 0 || s.memberships[notebook.TeamID][actorID]
+	if current.Status == "draft" && actorID > 0 && current.AuthorID == actorID && member {
+		if len(revisions) == 1 {
+			delete(s.notebooks, notebookID)
+			delete(s.revisions, notebookID)
+			return data.DeleteNotebookResult{Revision: current, DeletedNotebook: true}, nil
+		}
+		s.revisions[notebookID] = revisions[1:]
+		return data.DeleteNotebookResult{Revision: current}, nil
+	}
+	actor, actorExists := s.usersByID[actorID]
+	if adminPublished && current.Status == "approved" && actorExists && actor.Role == "admin" {
+		delete(s.notebooks, notebookID)
+		delete(s.revisions, notebookID)
+		return data.DeleteNotebookResult{Revision: current, DeletedNotebook: true}, nil
+	}
+	return data.DeleteNotebookResult{}, data.ErrForbidden
+}
+
 func (s *fakeStore) DeleteNotebookRevision(ctx context.Context, revisionID int) error {
 	for notebookID, revisions := range s.revisions {
 		filtered := make([]data.NotebookRevision, 0, len(revisions))
@@ -189,10 +279,12 @@ func (s *fakeStore) ListNotebookRevisions(ctx context.Context, notebookID int) (
 }
 
 func (s *fakeStore) CreateTag(ctx context.Context, name string) (int, error) {
-	return 1, nil
+	s.tagCreateCalls++
+	return s.tagCreateCalls, nil
 }
 
 func (s *fakeStore) AttachTag(ctx context.Context, notebookID, tagID int) error {
+	s.tagAttachCalls++
 	return nil
 }
 
@@ -201,6 +293,7 @@ func (s *fakeStore) ListNotebookTags(ctx context.Context, notebookID int) ([]dat
 }
 
 func (s *fakeStore) InsertAuditLog(ctx context.Context, params data.InsertAuditLogParams) error {
+	s.auditInsertCalls++
 	return nil
 }
 

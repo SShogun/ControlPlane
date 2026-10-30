@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/SShogun/ControlPlane/internal/notebookauth"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -78,18 +80,6 @@ func (s *PgxStore) CreateUser(ctx context.Context, params CreateUserParams) (int
 	return id, nil
 }
 
-func (s *PgxStore) DeleteNotebook(ctx context.Context, notebookID int) error {
-	const query = `DELETE FROM notebooks WHERE id = $1`
-	_, err := s.DB.Exec(ctx, query, notebookID)
-	return err
-}
-
-func (s *PgxStore) DeleteNotebookRevision(ctx context.Context, revisionID int) error {
-	const query = `DELETE FROM notebook_revisions WHERE id = $1`
-	_, err := s.DB.Exec(ctx, query, revisionID)
-	return err
-}
-
 func (s *PgxStore) CreateNotebookRevision(ctx context.Context, params CreateNotebookRevisionParams) (int, error) {
 	const query = `
 		INSERT INTO notebook_revisions (notebook_id, author_id, title, body, status, created_at, updated_at)
@@ -112,7 +102,7 @@ func (s *PgxStore) ListNotebookRevisions(ctx context.Context, notebookID int) ([
 		FROM notebook_revisions nr
 		LEFT JOIN approvals a ON a.notebook_revision_id = nr.id
 		WHERE nr.notebook_id = $1
-		ORDER BY nr.created_at DESC
+		ORDER BY nr.created_at DESC, nr.id DESC
 	`
 
 	rows, err := s.DB.Query(ctx, query, notebookID)
@@ -347,6 +337,157 @@ func (s *PgxStore) CreateDraft(ctx context.Context, params CreateDraftParams) (i
 	return id, nil
 }
 
+// editableDraftTx serializes changes to a notebook and protects its membership
+// and latest revision for the duration of the caller's transaction.
+func lockedLatestRevisionTx(ctx context.Context, tx pgx.Tx, notebookID int) (NotebookRevision, int, error) {
+	var teamID int
+	err := tx.QueryRow(ctx, `SELECT COALESCE(team_id, 0) FROM notebooks WHERE id = $1 FOR UPDATE`, notebookID).Scan(&teamID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return NotebookRevision{}, 0, ErrNotFound
+	}
+	if err != nil {
+		return NotebookRevision{}, 0, err
+	}
+	var revision NotebookRevision
+	err = tx.QueryRow(ctx, `SELECT id, notebook_id, author_id, title, body, status, created_at, updated_at
+		FROM notebook_revisions WHERE notebook_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE`, notebookID).
+		Scan(&revision.ID, &revision.NotebookID, &revision.AuthorID, &revision.Title, &revision.Body,
+			&revision.Status, &revision.CreatedAt, &revision.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return NotebookRevision{}, 0, ErrNotFound
+	}
+	if err != nil {
+		return NotebookRevision{}, 0, err
+	}
+	return revision, teamID, nil
+}
+
+func authorizeDraftTx(ctx context.Context, tx pgx.Tx, actorID int, revision NotebookRevision, teamID int) error {
+	if actorID <= 0 || actorID != revision.AuthorID {
+		return ErrForbidden
+	}
+	member := false
+	if teamID != 0 {
+		var ignored int
+		err := tx.QueryRow(ctx, `SELECT 1 FROM memberships WHERE user_id = $1 AND team_id = $2 FOR SHARE`, actorID, teamID).Scan(&ignored)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		member = err == nil
+	}
+	return notebookauth.AuthorizeDraft(actorID, revision.AuthorID, teamID, member, revision.Status)
+}
+
+func editableDraftTx(ctx context.Context, tx pgx.Tx, notebookID, actorID int) (NotebookRevision, error) {
+	revision, teamID, err := lockedLatestRevisionTx(ctx, tx, notebookID)
+	if err != nil {
+		return NotebookRevision{}, err
+	}
+	if err := authorizeDraftTx(ctx, tx, actorID, revision, teamID); err != nil {
+		return NotebookRevision{}, err
+	}
+	return revision, nil
+}
+
+// deleteNotebookAsTx checks authorization while holding the target locks.
+func deleteNotebookAsTx(ctx context.Context, tx pgx.Tx, notebookID, actorID int, adminPublished bool) (DeleteNotebookResult, error) {
+	revision, teamID, err := lockedLatestRevisionTx(ctx, tx, notebookID)
+	if err != nil {
+		return DeleteNotebookResult{}, err
+	}
+	deleteNotebook := false
+	if revision.Status == "draft" {
+		if err := authorizeDraftTx(ctx, tx, actorID, revision, teamID); err != nil {
+			return DeleteNotebookResult{}, err
+		}
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM notebook_revisions WHERE notebook_id = $1`, notebookID).Scan(&count); err != nil {
+			return DeleteNotebookResult{}, err
+		}
+		deleteNotebook = count == 1
+	} else if adminPublished && revision.Status == "approved" {
+		var ignored int
+		err := tx.QueryRow(ctx, `SELECT 1 FROM memberships WHERE user_id = $1 AND role = 'admin' LIMIT 1 FOR SHARE`, actorID).Scan(&ignored)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return DeleteNotebookResult{}, ErrForbidden
+		}
+		if err != nil {
+			return DeleteNotebookResult{}, err
+		}
+		deleteNotebook = true
+	} else {
+		return DeleteNotebookResult{}, ErrForbidden
+	}
+	var result pgconn.CommandTag
+	if deleteNotebook {
+		result, err = tx.Exec(ctx, `DELETE FROM notebooks WHERE id = $1`, notebookID)
+	} else {
+		result, err = tx.Exec(ctx, `DELETE FROM notebook_revisions WHERE id = $1 AND notebook_id = $2`, revision.ID, notebookID)
+	}
+	if err != nil {
+		return DeleteNotebookResult{}, err
+	}
+	if result.RowsAffected() != 1 {
+		return DeleteNotebookResult{}, ErrNotFound
+	}
+	return DeleteNotebookResult{Revision: revision, DeletedNotebook: deleteNotebook}, nil
+}
+
+func (s *PgxStore) DeleteNotebookAs(ctx context.Context, notebookID, actorID int, adminPublished bool) (DeleteNotebookResult, error) {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return DeleteNotebookResult{}, err
+	}
+	defer tx.Rollback(ctx)
+	result, err := deleteNotebookAsTx(ctx, tx, notebookID, actorID, adminPublished)
+	if err != nil {
+		return DeleteNotebookResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return DeleteNotebookResult{}, err
+	}
+	return result, nil
+}
+
+func (s *PgxStore) GetEditableDraft(ctx context.Context, notebookID, actorID int) (NotebookRevision, error) {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return NotebookRevision{}, err
+	}
+	defer tx.Rollback(ctx)
+	revision, err := editableDraftTx(ctx, tx, notebookID, actorID)
+	if err != nil {
+		return NotebookRevision{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return NotebookRevision{}, err
+	}
+	return revision, nil
+}
+
+func (s *PgxStore) SubmitDraft(ctx context.Context, notebookID, actorID int) (int, error) {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	revision, err := editableDraftTx(ctx, tx, notebookID, actorID)
+	if err != nil {
+		return 0, err
+	}
+	result, err := tx.Exec(ctx, `UPDATE notebook_revisions SET status = 'submitted', updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND notebook_id = $2 AND status = 'draft'`, revision.ID, notebookID)
+	if err != nil {
+		return 0, err
+	}
+	if result.RowsAffected() != 1 {
+		return 0, ErrNotDraft
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return revision.ID, nil
+}
+
 func (s *PgxStore) UpdateDraft(ctx context.Context, params UpdateDraftParams) (revisionID int, err error) {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
@@ -359,13 +500,21 @@ func (s *PgxStore) UpdateDraft(ctx context.Context, params UpdateDraftParams) (r
 		}
 	}()
 
+	if _, err = editableDraftTx(ctx, tx, params.NotebookID, params.AuthorID); err != nil {
+		return 0, err
+	}
+
 	const updateNotebookQuery = `
 		UPDATE notebooks
 		SET title = $1, content = $2, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $3
 	`
-	if _, err = tx.Exec(ctx, updateNotebookQuery, params.Title, params.Body, params.NotebookID); err != nil {
+	result, err := tx.Exec(ctx, updateNotebookQuery, params.Title, params.Body, params.NotebookID)
+	if err != nil {
 		return 0, err
+	}
+	if result.RowsAffected() != 1 {
+		return 0, ErrNotFound
 	}
 
 	const insertRevisionQuery = `
@@ -375,6 +524,16 @@ func (s *PgxStore) UpdateDraft(ctx context.Context, params UpdateDraftParams) (r
 	`
 	if err = tx.QueryRow(ctx, insertRevisionQuery, params.NotebookID, params.AuthorID, params.Title, params.Body).Scan(&revisionID); err != nil {
 		return 0, err
+	}
+
+	for _, name := range params.Tags {
+		var tagID int
+		if err = tx.QueryRow(ctx, `INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id`, name).Scan(&tagID); err != nil {
+			return 0, err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO notebook_tags (notebook_id, tag_id) VALUES ($1, $2) ON CONFLICT (notebook_id, tag_id) DO NOTHING`, params.NotebookID, tagID); err != nil {
+			return 0, err
+		}
 	}
 
 	if err = tx.Commit(ctx); err != nil {
@@ -470,70 +629,140 @@ func (s *PgxStore) InsertAuditLog(ctx context.Context, params InsertAuditLogPara
 	_, err := s.DB.Exec(ctx, query, params.UserID, params.Action, params.EntityType, params.EntityID, details)
 	return err
 }
+func lockSubmittedRevision(ctx context.Context, tx pgx.Tx, revisionID, notebookID int) error {
+	var lockedNotebookID int
+	err := tx.QueryRow(ctx, `SELECT id FROM notebooks WHERE id = $1 FOR UPDATE`, notebookID).Scan(&lockedNotebookID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	var actualNotebookID int
+	var status string
+	err = tx.QueryRow(ctx, `SELECT notebook_id, status FROM notebook_revisions WHERE id = $1 FOR UPDATE`, revisionID).Scan(&actualNotebookID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if actualNotebookID != notebookID {
+		return ErrNotFound
+	}
+	if status != "submitted" {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+func transitionSubmittedRevision(ctx context.Context, tx pgx.Tx, revisionID, notebookID int, status string) error {
+	result, err := tx.Exec(ctx, `UPDATE notebook_revisions SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND notebook_id = $3 AND status = 'submitted'`, status, revisionID, notebookID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+func approveRevisionTx(ctx context.Context, tx pgx.Tx, revisionID, notebookID, reviewerID int, note string) error {
+	if err := lockSubmittedRevision(ctx, tx, revisionID, notebookID); err != nil {
+		return err
+	}
+	if err := transitionSubmittedRevision(ctx, tx, revisionID, notebookID, "approved"); err != nil {
+		return err
+	}
+
+	result, err := tx.Exec(ctx, `UPDATE notebooks SET current_published_revision_id = $1,
+		title = nr.title, content = nr.body, is_published = true, updated_at = CURRENT_TIMESTAMP
+		FROM notebook_revisions nr WHERE notebooks.id = $2 AND nr.id = $1 AND nr.notebook_id = notebooks.id`, revisionID, notebookID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+
+	var details interface{}
+	if note != "" {
+		details = fmt.Sprintf(`{"note": %q}`, note)
+	}
+	result, err = tx.Exec(ctx, `INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, details, created_at)
+		VALUES ($1, 'revision_approved', 'notebook_revision', $2, $3::jsonb, CURRENT_TIMESTAMP)`, reviewerID, revisionID, details)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("approval audit insert affected %d rows", result.RowsAffected())
+	}
+	result, err = tx.Exec(ctx, `INSERT INTO approvals (notebook_revision_id, reviewer_id, decision, note, created_at)
+		VALUES ($1, $2, 'approved', $3, CURRENT_TIMESTAMP)`, revisionID, reviewerID, note)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("approval insert affected %d rows", result.RowsAffected())
+	}
+	return nil
+}
+
 func (s *PgxStore) ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int, note string) (err error) {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		rollbackErr := tx.Rollback(ctx)
-		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
 			err = errors.Join(err, rollbackErr)
 		}
 	}()
+	if err = approveRevisionTx(ctx, tx, revisionID, notebookID, reviewerID, note); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
-	const updateRevisionQuery = `
-		UPDATE notebook_revisions
-		SET status = 'approved', updated_at = CURRENT_TIMESTAMP
-		WHERE id = $1
-	`
-	_, err = tx.Exec(ctx, updateRevisionQuery, revisionID)
+func rejectRevisionTx(ctx context.Context, tx pgx.Tx, revisionID, reviewerID int, note string) error {
+	// Resolve the parent without a lock, then acquire locks in notebook-before-revision order.
+	var notebookID int
+	err := tx.QueryRow(ctx, `SELECT notebook_id FROM notebook_revisions WHERE id = $1`, revisionID).Scan(&notebookID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
 	if err != nil {
 		return err
 	}
-
-	const updateNotebookQuery = `
-		UPDATE notebooks
-		SET current_published_revision_id = $1,
-			title = nr.title,
-			content = nr.body,
-			is_published = true,
-			updated_at = CURRENT_TIMESTAMP
-		FROM notebook_revisions nr
-		WHERE notebooks.id = $2
-		  AND nr.id = $1
-	`
-	_, err = tx.Exec(ctx, updateNotebookQuery, revisionID, notebookID)
-	if err != nil {
+	if err := lockSubmittedRevision(ctx, tx, revisionID, notebookID); err != nil {
+		return err
+	}
+	if err := transitionSubmittedRevision(ctx, tx, revisionID, notebookID, "rejected"); err != nil {
 		return err
 	}
 
-	const auditQuery = `
-		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, details, created_at)
-		VALUES ($1, $2, $3, $4, $5::jsonb, CURRENT_TIMESTAMP)
-	`
+	result, err := tx.Exec(ctx, `INSERT INTO approvals (notebook_revision_id, reviewer_id, decision, note, created_at)
+		VALUES ($1, $2, 'rejected', $3, CURRENT_TIMESTAMP)`, revisionID, reviewerID, note)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("rejection insert affected %d rows", result.RowsAffected())
+	}
 	var details interface{}
-	if note == "" {
-		details = nil
-	} else {
+	if note != "" {
 		details = fmt.Sprintf(`{"note": %q}`, note)
 	}
-	_, err = tx.Exec(ctx, auditQuery, reviewerID, "revision_approved", "notebook_revision", revisionID, details)
+	result, err = tx.Exec(ctx, `INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, details, created_at)
+		VALUES ($1, 'revision_rejected', 'notebook_revision', $2, $3::jsonb, CURRENT_TIMESTAMP)`, reviewerID, revisionID, details)
 	if err != nil {
 		return err
 	}
-
-	const approvalQuery = `
-		INSERT INTO approvals (notebook_revision_id, reviewer_id, decision, note, created_at)
-		VALUES ($1, $2, 'approved', $3, CURRENT_TIMESTAMP)
-	`
-	_, err = tx.Exec(ctx, approvalQuery, revisionID, reviewerID, note)
-	if err != nil {
-		return err
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("rejection audit insert affected %d rows", result.RowsAffected())
 	}
-
-	err = tx.Commit(ctx)
-	return err
+	return nil
 }
 
 func (s *PgxStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID int, note string) (err error) {
@@ -542,48 +771,14 @@ func (s *PgxStore) RejectRevisionTx(ctx context.Context, revisionID, reviewerID 
 		return err
 	}
 	defer func() {
-		rollbackErr := tx.Rollback(ctx)
-		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
 			err = errors.Join(err, rollbackErr)
 		}
 	}()
-
-	const updateRevisionQuery = `
-		UPDATE notebook_revisions
-		SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
-		WHERE id = $1
-	`
-	_, err = tx.Exec(ctx, updateRevisionQuery, revisionID)
-	if err != nil {
+	if err = rejectRevisionTx(ctx, tx, revisionID, reviewerID, note); err != nil {
 		return err
 	}
-
-	const approvalQuery = `
-		INSERT INTO approvals (notebook_revision_id, reviewer_id, decision, note, created_at)
-		VALUES ($1, $2, 'rejected', $3, CURRENT_TIMESTAMP)
-	`
-	_, err = tx.Exec(ctx, approvalQuery, revisionID, reviewerID, note)
-	if err != nil {
-		return err
-	}
-
-	const auditQuery = `
-		INSERT INTO audit_events (actor_id, event_type, entity_type, entity_id, details, created_at)
-		VALUES ($1, 'revision_rejected', 'notebook_revision', $2, $3::jsonb, CURRENT_TIMESTAMP)
-	`
-	var details interface{}
-	if note == "" {
-		details = nil
-	} else {
-		details = fmt.Sprintf(`{"note": %q}`, note)
-	}
-	_, err = tx.Exec(ctx, auditQuery, reviewerID, revisionID, details)
-	if err != nil {
-		return err
-	}
-
-	err = tx.Commit(ctx)
-	return err
+	return tx.Commit(ctx)
 }
 
 func (s *PgxStore) ListSubmittedRevisions(ctx context.Context) ([]NotebookRevision, error) {
@@ -613,17 +808,6 @@ func (s *PgxStore) ListSubmittedRevisions(ctx context.Context) ([]NotebookRevisi
 		return nil, err
 	}
 	return revisions, nil
-}
-
-func (s *PgxStore) UpdateRevisionStatus(ctx context.Context, params UpdateRevisionStatusParams) error {
-	const query = `
-		UPDATE notebook_revisions
-		SET status = $1, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $2
-	`
-
-	_, err := s.DB.Exec(ctx, query, params.Status, params.ID)
-	return err
 }
 
 func (s *PgxStore) CreateModerationFlag(ctx context.Context, params CreateModerationFlagParams) (int, error) {

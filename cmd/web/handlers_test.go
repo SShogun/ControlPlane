@@ -27,11 +27,13 @@ to simulate operations
 
 // mockStore is a fake implementation of data.UserStore for testing.
 type mockStore struct {
-	users      map[int]*data.User
-	notebooks  map[int]*data.Notebook
-	revisions  map[int][]data.NotebookRevision
-	tags       map[int][]data.Tag
-	nextUserID int
+	users          map[int]*data.User
+	notebooks      map[int]*data.Notebook
+	revisions      map[int][]data.NotebookRevision
+	tags           map[int][]data.Tag
+	memberships    map[int]map[int]bool
+	nextUserID     int
+	nextRevisionID int
 
 	createDraftCalled            bool
 	createNotebookRevisionCalled bool
@@ -42,15 +44,22 @@ type mockStore struct {
 	lastApprovedRevisionID  int
 	lastApprovedNotebookID  int
 	lastApprovedReviewerID  int
+	updateDraftCalls        int
+	submitDraftCalls        int
+	auditInsertCalls        int
+	tagCreateCalls          int
+	tagAttachCalls          int
 }
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		users:      make(map[int]*data.User),
-		notebooks:  make(map[int]*data.Notebook),
-		revisions:  make(map[int][]data.NotebookRevision),
-		tags:       make(map[int][]data.Tag),
-		nextUserID: 1,
+		users:          make(map[int]*data.User),
+		notebooks:      make(map[int]*data.Notebook),
+		revisions:      make(map[int][]data.NotebookRevision),
+		tags:           make(map[int][]data.Tag),
+		memberships:    make(map[int]map[int]bool),
+		nextUserID:     1,
+		nextRevisionID: 1,
 	}
 }
 
@@ -115,6 +124,10 @@ func (m *mockStore) CreateDraft(ctx context.Context, params data.CreateDraftPara
 }
 
 func (m *mockStore) UpdateDraft(ctx context.Context, params data.UpdateDraftParams) (int, error) {
+	if _, err := m.GetEditableDraft(ctx, params.NotebookID, params.AuthorID); err != nil {
+		return 0, err
+	}
+	m.updateDraftCalls++
 	m.createNotebookRevisionCalled = true
 	m.lastCreateRevisionParams = data.CreateNotebookRevisionParams{
 		DocumentID: params.NotebookID,
@@ -123,7 +136,44 @@ func (m *mockStore) UpdateDraft(ctx context.Context, params data.UpdateDraftPara
 		Body:       params.Body,
 		Status:     "draft",
 	}
-	return 2, nil
+	revision := data.NotebookRevision{ID: m.nextRevisionID, NotebookID: params.NotebookID, AuthorID: params.AuthorID, Title: params.Title, Body: params.Body, Status: "draft"}
+	m.nextRevisionID++
+	m.revisions[params.NotebookID] = append([]data.NotebookRevision{revision}, m.revisions[params.NotebookID]...)
+	for range params.Tags {
+		m.tagCreateCalls++
+		m.tagAttachCalls++
+	}
+	return revision.ID, nil
+}
+
+func (m *mockStore) GetEditableDraft(ctx context.Context, notebookID, actorID int) (data.NotebookRevision, error) {
+	notebook, ok := m.notebooks[notebookID]
+	if !ok {
+		return data.NotebookRevision{}, data.ErrNotFound
+	}
+	revisions := m.revisions[notebookID]
+	if len(revisions) == 0 {
+		return data.NotebookRevision{}, data.ErrNotFound
+	}
+	current := revisions[0]
+	member := notebook.TeamID == 0 || m.memberships[notebook.TeamID][actorID]
+	if actorID <= 0 || current.AuthorID != actorID || !member {
+		return data.NotebookRevision{}, data.ErrForbidden
+	}
+	if current.Status != "draft" {
+		return data.NotebookRevision{}, data.ErrNotDraft
+	}
+	return current, nil
+}
+
+func (m *mockStore) SubmitDraft(ctx context.Context, notebookID, actorID int) (int, error) {
+	current, err := m.GetEditableDraft(ctx, notebookID, actorID)
+	if err != nil {
+		return 0, err
+	}
+	m.submitDraftCalls++
+	m.revisions[notebookID][0].Status = "submitted"
+	return current.ID, nil
 }
 
 func (m *mockStore) ListRecentDrafts(ctx context.Context, authorID int) ([]data.NotebookRevision, error) {
@@ -160,6 +210,35 @@ func (m *mockStore) DeleteNotebook(ctx context.Context, notebookID int) error {
 	return nil
 }
 
+func (m *mockStore) DeleteNotebookAs(ctx context.Context, notebookID, actorID int, adminPublished bool) (data.DeleteNotebookResult, error) {
+	notebook, ok := m.notebooks[notebookID]
+	if !ok {
+		return data.DeleteNotebookResult{}, data.ErrNotFound
+	}
+	revisions := m.revisions[notebookID]
+	if len(revisions) == 0 {
+		return data.DeleteNotebookResult{}, data.ErrNotFound
+	}
+	current := revisions[0]
+	member := notebook.TeamID == 0 || m.memberships[notebook.TeamID][actorID]
+	if current.Status == "draft" && actorID > 0 && current.AuthorID == actorID && member {
+		if len(revisions) == 1 {
+			delete(m.notebooks, notebookID)
+			delete(m.revisions, notebookID)
+			return data.DeleteNotebookResult{Revision: current, DeletedNotebook: true}, nil
+		}
+		m.revisions[notebookID] = revisions[1:]
+		return data.DeleteNotebookResult{Revision: current}, nil
+	}
+	actor, actorExists := m.users[actorID]
+	if adminPublished && current.Status == "approved" && actorExists && actor.Role == "admin" {
+		delete(m.notebooks, notebookID)
+		delete(m.revisions, notebookID)
+		return data.DeleteNotebookResult{Revision: current, DeletedNotebook: true}, nil
+	}
+	return data.DeleteNotebookResult{}, data.ErrForbidden
+}
+
 func (m *mockStore) DeleteNotebookRevision(ctx context.Context, revisionID int) error {
 	for notebookID, revisions := range m.revisions {
 		filtered := make([]data.NotebookRevision, 0, len(revisions))
@@ -187,10 +266,12 @@ func (m *mockStore) ListNotebookRevisions(ctx context.Context, notebookID int) (
 }
 
 func (m *mockStore) CreateTag(ctx context.Context, name string) (int, error) {
-	return 1, nil
+	m.tagCreateCalls++
+	return m.tagCreateCalls, nil
 }
 
 func (m *mockStore) AttachTag(ctx context.Context, notebookID, tagID int) error {
+	m.tagAttachCalls++
 	return nil
 }
 
@@ -202,6 +283,7 @@ func (m *mockStore) ListNotebookTags(ctx context.Context, notebookID int) ([]dat
 }
 
 func (m *mockStore) InsertAuditLog(ctx context.Context, params data.InsertAuditLogParams) error {
+	m.auditInsertCalls++
 	return nil
 }
 

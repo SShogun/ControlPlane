@@ -48,6 +48,14 @@ func (app *Application) routes() http.Handler {
 	r.With(app.rateLimitLogin).Post("/login", app.loginSubmit)
 
 	r.Group(func(r chi.Router) {
+		r.Use(app.requireAuthenticatedDraft)
+		r.Get("/notebooks/{id}/edit", app.notebookEditForm)
+		r.Post("/notebooks/{id}/edit", app.notebookEditSubmit)
+		r.Post("/notebooks/{id}/submit", app.notebookSubmitForApproval)
+		r.Post("/notebooks/{id}/delete", app.notebookDeleteSubmit)
+	})
+
+	r.Group(func(r chi.Router) {
 		r.Use(app.requireAuthentication)
 		r.Get("/dashboard", app.dashboard)
 		r.Post("/logout", app.logout)
@@ -56,10 +64,6 @@ func (app *Application) routes() http.Handler {
 		r.Get("/notebooks", app.listNotebooks)
 		r.Get("/notebooks/search", app.notebooksSearch)
 		r.Get("/notebooks/{id}", app.notebookView)
-		r.Get("/notebooks/{id}/edit", app.notebookEditForm)
-		r.Post("/notebooks/{id}/edit", app.notebookEditSubmit)
-		r.Post("/notebooks/{id}/submit", app.notebookSubmitForApproval)
-		r.Post("/notebooks/{id}/delete", app.notebookDeleteSubmit)
 		r.Post("/notebooks/{id}/flag", app.notebookFlagSubmit)
 
 		r.Group(func(r chi.Router) {

@@ -1,11 +1,23 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/SShogun/ControlPlane/internal/data"
 )
+
+func (app *Application) handleApprovalError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, data.ErrNotFound):
+		http.NotFound(w, r)
+	case errors.Is(err, data.ErrInvalidTransition):
+		http.Error(w, "revision is not submitted", http.StatusConflict)
+	default:
+		app.serverError(w, err)
+	}
+}
 
 func (app *Application) approveRevisionSubmit(w http.ResponseWriter, r *http.Request) {
 
@@ -32,7 +44,7 @@ func (app *Application) approveRevisionSubmit(w http.ResponseWriter, r *http.Req
 
 	err := app.store.ApproveRevisionTx(r.Context(), revisionID, docID, reviewer.ID, note)
 	if err != nil {
-		app.serverError(w, err)
+		app.handleApprovalError(w, r, err)
 		return
 	}
 
@@ -105,7 +117,7 @@ func (app *Application) rejectRevisionSubmit(w http.ResponseWriter, r *http.Requ
 
 	err := app.store.RejectRevisionTx(r.Context(), revisionID, reviewer.ID, note)
 	if err != nil {
-		app.serverError(w, err)
+		app.handleApprovalError(w, r, err)
 		return
 	}
 

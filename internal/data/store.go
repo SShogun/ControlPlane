@@ -2,7 +2,17 @@ package data
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"github.com/SShogun/ControlPlane/internal/notebookauth"
+)
+
+var (
+	ErrNotFound          = notebookauth.ErrNotFound
+	ErrForbidden         = notebookauth.ErrForbidden
+	ErrNotDraft          = notebookauth.ErrNotDraft
+	ErrInvalidTransition = errors.New("revision is not submitted")
 )
 
 type User struct {
@@ -82,11 +92,12 @@ type UserStore interface {
 	SearchNotebooks(ctx context.Context, query string) ([]Notebook, error)
 	NotebookView(ctx context.Context, id int) ([]Notebook, error)
 	CreateDraft(ctx context.Context, params CreateDraftParams) (int, error)
+	GetEditableDraft(ctx context.Context, notebookID, actorID int) (NotebookRevision, error)
 	UpdateDraft(ctx context.Context, params UpdateDraftParams) (int, error)
+	SubmitDraft(ctx context.Context, notebookID, actorID int) (int, error)
 	ListRecentDrafts(ctx context.Context, authorID int) ([]NotebookRevision, error)
 	ListAuditEvents(ctx context.Context) ([]AuditEvent, error)
-	DeleteNotebook(ctx context.Context, notebookID int) error
-	DeleteNotebookRevision(ctx context.Context, revisionID int) error
+	DeleteNotebookAs(ctx context.Context, notebookID, actorID int, adminPublished bool) (DeleteNotebookResult, error)
 	ListTeams(ctx context.Context) ([]Team, error)
 	GetTeam(ctx context.Context, id int) (Team, error)
 	AddMembership(ctx context.Context, userID, teamID int, role string) error
@@ -99,7 +110,6 @@ type UserStore interface {
 	ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int, note string) error
 	RejectRevisionTx(ctx context.Context, revisionID, reviewerID int, note string) error
 	ListSubmittedRevisions(ctx context.Context) ([]NotebookRevision, error)
-	UpdateRevisionStatus(ctx context.Context, params UpdateRevisionStatusParams) error
 	CreateModerationFlag(ctx context.Context, params CreateModerationFlagParams) (int, error)
 	ListModerationFlags(ctx context.Context) ([]ModerationFlag, error)
 	ResolveModerationFlag(ctx context.Context, id int) error
@@ -116,6 +126,11 @@ type Notebook struct {
 	CurrentPublishedRevisionID int
 	CreatedAt                  time.Time
 	UpdatedAt                  time.Time
+}
+
+type DeleteNotebookResult struct {
+	Revision        NotebookRevision
+	DeletedNotebook bool
 }
 
 type CreateNotebookRevisionParams struct {
@@ -139,6 +154,7 @@ type UpdateDraftParams struct {
 	AuthorID   int
 	Title      string
 	Body       string
+	Tags       []string
 }
 
 type InsertAuditLogParams struct {

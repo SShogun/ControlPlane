@@ -37,6 +37,16 @@ func (app *Application) requireAuthentication(next http.Handler) http.Handler {
 	})
 }
 
+func (app *Application) requireAuthenticatedDraft(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if contextGetUser(r.Context()) == nil {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (app *Application) requireRole(role string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

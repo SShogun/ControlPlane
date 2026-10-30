@@ -260,9 +260,9 @@ type UserStore interface {
     ListNotebookRevisions(ctx context.Context, notebookID int) ([]NotebookRevision, error)
     ListNotebookTags(ctx context.Context, notebookID int) ([]Tag, error)
     InsertAuditLog(ctx context.Context, params InsertAuditLogParams) error
-    ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int) error
+    ApproveRevisionTx(ctx context.Context, revisionID, notebookID, reviewerID int, note string) error
+    RejectRevisionTx(ctx context.Context, revisionID, reviewerID int, note string) error
     ListSubmittedRevisions(ctx context.Context) ([]NotebookRevision, error)
-    UpdateRevisionStatus(ctx context.Context, params UpdateRevisionStatusParams) error
     // ... and more
 }
 ```
